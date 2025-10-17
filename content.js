@@ -91,24 +91,6 @@
         });
     }
 
-    async function getVideoDuration(url) {
-        try {
-            console.log('尝试通过video元素获取视频时长:', url);
-
-            // 对于非m3u8格式，尝试通过创建video元素获取时长
-            if (!url.includes('.m3u8')) {
-                return await getVideoDurationFromElement(url);
-            }
-
-            // m3u8格式的时长已在验证阶段获取，这里不再重复请求
-            return null;
-
-        } catch (error) {
-            console.warn('获取视频时长失败:', url, error.message);
-            return null;
-        }
-    }
-
     function formatDuration(seconds) {
         if (seconds < 1) return null;
 

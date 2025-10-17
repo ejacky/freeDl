@@ -159,22 +159,6 @@ chrome.tabs.onRemoved.addListener((tabId) => {
     if (detectedUrls.has(tabId)) {
         detectedUrls.delete(tabId);
         console.log(`标签页 ${tabId} 已关闭，清理检测到的URL数据`);
-
-        // 清除标签页的徽章和图标状态
-        // chrome.action.setBadgeText({
-        //     tabId: tabId,
-        //     text: ''
-        // });
-
-        // 恢复默认图标（如果有必要）
-        // chrome.action.setIcon({
-        //     tabId: tabId,
-        //     path: {
-        //         16: 'icons/icon16.png',
-        //         48: 'icons/icon48.png',
-        //         128: 'icons/icon128.png'
-        //     }
-        // });
     }
 });
 

@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Downloader 测试页面</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .test-section h3 {
+            margin-top: 0;
+            color: #333;
+        }
+        .video-container {
+            margin: 10px 0;
+        }
+        .hidden-url {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <h1>🎬 Video Downloader 测试页面</h1>
+    <p>这个页面包含各种隐藏的m3u8 URL，用于测试扩展的检测能力。</p>
+
+    <div class="test-section">
+        <h3>测试1: 链接中的m3u8 URL</h3>
+        <p>直接链接：<a href="https://example.com/video.m3u8">点击下载视频</a></p>
+        <p>带参数的链接：<a href="https://cdn.example.com/stream.m3u8?token=abc123&quality=high">高清视频流</a></p>
+    </div>
+
+    <div class="test-section">
+        <h3>测试2: JavaScript中的m3u8 URL</h3>
+        <script>
+            var videoUrl = "https://stream.example.com/playlist.m3u8";
+            var streamSource = "https://media.example.com/index.m3u8?format=hls";
+            var hlsUrl = "https://cdn.example.com/master.m3u8";
+            
+            // 模拟视频播放器初始化
+            function initVideoPlayer() {
+                const config = {
+                    source: "https://player.example.com/video.m3u8",
+                    quality: "auto"
+                };
+                console.log("视频配置:", config);
+            }
+            
+            // 延迟设置URL
+            setTimeout(() => {
+                window.dynamicVideoUrl = "https://dynamic.example.com/live.m3u8";
+            }, 1000);
+        </script>
+    </div>
+
+    <div class="test-section">
+        <h3>测试3: HTML属性中的m3u8 URL</h3>
+        <div data-src="https://attr.example.com/source.m3u8">隐藏的源</div>
+        <video data-url="https://video.example.com/stream.m3u8" controls>
+            <source src="https://source.example.com/playlist.m3u8" type="application/vnd.apple.mpegurl">
+        </video>
+        <div data-stream="https://stream.example.com/channel.m3u8">流媒体源</div>
+    </div>
+
+    <div class="test-section">
+        <h3>测试4: 隐藏的文本内容</h3>
+        <p class="hidden-url">隐藏的URL: https://hidden.example.com/secret.m3u8</p>
+        <div style="color: white; background: white;">白色文字中的URL: https://invisible.example.com/stream.m3u8</div>
+        <span style="font-size: 0;">零大小文字: https://tiny.example.com/video.m3u8</span>
+    </div>
+
+    <div class="test-section">
+        <h3>测试5: 网络请求模拟</h3>
+        <button onclick="simulateNetworkRequest()">模拟网络请求</button>
+        <script>
+            function simulateNetworkRequest() {
+                // 模拟fetch请求
+                fetch("https://api.example.com/stream.m3u8")
+                    .then(response => console.log("Fetch请求:", response.url));
+                
+                // 模拟XMLHttpRequest
+                const xhr = new XMLHttpRequest();
+                xhr.open("GET", "https://xhr.example.com/video.m3u8");
+                xhr.send();
+            }
+        </script>
+    </div>
+
+    <div class="test-section">
+        <h3>测试6: 存储中的URL</h3>
+        <button onclick="storeUrl()">存储URL到localStorage</button>
+        <script>
+            function storeUrl() {
+                localStorage.setItem('videoUrl', 'https://storage.example.com/cached.m3u8');
+                sessionStorage.setItem('streamUrl', 'https://session.example.com/temp.m3u8');
+                alert('URL已存储到localStorage和sessionStorage');
+            }
+        </script>
+    </div>
+
+    <div class="test-section">
+        <h3>测试7: 全局变量</h3>
+        <script>
+            window.videoUrl = "https://global.example.com/window.m3u8";
+            window.streamSource = "https://global.example.com/source.m3u8";
+            window.playlistData = {
+                primary: "https://nested.example.com/primary.m3u8",
+                backup: "https://nested.example.com/backup.m3u8"
+            };
+        </script>
+    </div>
+
+    <div class="test-section">
+        <h3>使用说明</h3>
+        <ol>
+            <li>安装Video Downloader扩展</li>
+            <li>刷新此页面</li>
+            <li>查看右上角的调试面板</li>
+            <li>点击"🔍 手动检测"按钮</li>
+            <li>查看检测结果</li>
+            <li>点击扩展图标测试弹窗功能</li>
+        </ol>
+    </div>
+
+    <div class="test-section">
+        <h3>预期结果</h3>
+        <p>扩展应该能够检测到以下URL：</p>
+        <ul>
+            <li>https://example.com/video.m3u8</li>
+            <li>https://cdn.example.com/stream.m3u8</li>
+            <li>https://stream.example.com/playlist.m3u8</li>
+            <li>https://media.example.com/index.m3u8</li>
+            <li>https://cdn.example.com/master.m3u8</li>
+            <li>https://player.example.com/video.m3u8</li>
+            <li>https://dynamic.example.com/live.m3u8</li>
+            <li>https://attr.example.com/source.m3u8</li>
+            <li>https://video.example.com/stream.m3u8</li>
+            <li>https://source.example.com/playlist.m3u8</li>
+            <li>https://stream.example.com/channel.m3u8</li>
+            <li>https://hidden.example.com/secret.m3u8</li>
+            <li>https://invisible.example.com/stream.m3u8</li>
+            <li>https://tiny.example.com/video.m3u8</li>
+            <li>https://global.example.com/window.m3u8</li>
+            <li>https://global.example.com/source.m3u8</li>
+            <li>https://nested.example.com/primary.m3u8</li>
+            <li>https://nested.example.com/backup.m3u8</li>
+        </ul>
+        <p><strong>注意：</strong>网络请求和存储中的URL需要先点击相应按钮触发。</p>
+    </div>
+
+    <script>
+        // 页面加载完成后显示提示
+        window.addEventListener('load', () => {
+            console.log('测试页面已加载，请查看调试面板检测结果');
+            if (window.videoDownloaderDebug) {
+                console.log('调试工具已可用');
+            }
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FreeDl - 视频下载器</title>
+    <style>
+        :root {
+            --primary-color: #4F46E5;
+            --primary-hover: #4338CA;
+            --success-color: #10B981;
+            --success-hover: #059669;
+            --warning-color: #F59E0B;
+            --error-color: #EF4444;
+            --info-color: #3B82F6;
+            --text-primary: #1F2937;
+            --text-secondary: #6B7280;
+            --text-tertiary: #9CA3AF;
+            --bg-primary: #FFFFFF;
+            --bg-secondary: #F9FAFB;
+            --bg-tertiary: #F3F4F6;
+            --border-color: #E5E7EB;
+            --border-hover: #D1D5DB;
+            --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+            --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            --radius-sm: 0.25rem;
+            --radius-md: 0.375rem;
+            --radius-lg: 0.5rem;
+            --radius-xl: 0.75rem;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            width: 420px;
+            min-height: 320px;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+            font-size: 14px;
+            line-height: 1.5;
+            color: var(--text-primary);
+            background-color: var(--bg-secondary);
+        }
+
+        .container {
+            background: var(--bg-primary);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-md);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, var(--primary-color), #6366F1);
+            padding: 20px;
+            text-align: center;
+            color: white;
+        }
+
+        .header h1 {
+            margin: 0;
+            font-size: 18px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .header-icon {
+            width: 24px;
+            height: 24px;
+        }
+
+        .content {
+            padding: 20px;
+        }
+
+        .status {
+            padding: 12px 16px;
+            border-radius: var(--radius-md);
+            margin-bottom: 16px;
+            font-size: 14px;
+            border: 1px solid transparent;
+            transition: all 0.3s ease;
+        }
+
+        .status.success {
+            background-color: #ECFDF5;
+            color: #065F46;
+            border-color: #DCFCE7;
+        }
+
+        .status.error {
+            background-color: #FEF2F2;
+            color: #991B1B;
+            border-color: #FEE2E2;
+        }
+
+        .status.info {
+            background-color: #EFF6FF;
+            color: #1E40AF;
+            border-color: #DBEAFE;
+        }
+
+        .status.warning {
+            background-color: #FFFBEB;
+            color: #92400E;
+            border-color: #FEF3C7;
+        }
+
+        .status.hidden {
+            display: none;
+        }
+
+        .action-section {
+            margin-bottom: 20px;
+        }
+
+        .btn {
+            width: 100%;
+            padding: 12px 20px;
+            border: none;
+            border-radius: var(--radius-md);
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .btn-primary {
+            background-color: var(--primary-color);
+            color: white;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            background-color: var(--primary-hover);
+            transform: translateY(-1px);
+            box-shadow: var(--shadow-md);
+        }
+
+        .btn-success {
+            background-color: var(--success-color);
+            color: white;
+        }
+
+        .btn-success:hover:not(:disabled) {
+            background-color: var(--success-hover);
+            transform: translateY(-1px);
+            box-shadow: var(--shadow-md);
+        }
+
+        .btn-secondary {
+            background-color: var(--bg-tertiary);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+        }
+
+        .btn-secondary:hover:not(:disabled) {
+            background-color: var(--border-hover);
+            border-color: var(--border-hover);
+        }
+
+        .video-details {
+            background-color: var(--bg-secondary);
+            border-radius: var(--radius-md);
+            padding: 16px;
+            margin-bottom: 20px;
+            border: 1px solid var(--border-color);
+        }
+
+        .video-details h3 {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .video-url {
+            font-size: 12px;
+            color: var(--text-secondary);
+            background-color: var(--bg-primary);
+            padding: 10px;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border-color);
+            word-break: break-all;
+            max-height: 80px;
+            overflow-y: auto;
+            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+        }
+
+        .progress-section {
+            margin-top: 16px;
+        }
+
+        .progress-container {
+            width: 100%;
+            height: 8px;
+            background-color: var(--bg-tertiary);
+            border-radius: 4px;
+            overflow: hidden;
+            margin-bottom: 8px;
+            position: relative;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, var(--primary-color), var(--success-color));
+            width: 0%;
+            transition: width 0.3s ease;
+            border-radius: 4px;
+        }
+
+        .progress-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .form-group {
+            margin-bottom: 12px;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--text-secondary);
+            margin-bottom: 6px;
+        }
+
+        .form-input {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            font-size: 13px;
+            color: var(--text-primary);
+            background-color: var(--bg-primary);
+            transition: all 0.2s ease;
+        }
+
+        .form-input:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
+        }
+
+        .form-input::placeholder {
+            color: var(--text-tertiary);
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .fade-in {
+            animation: fadeIn 0.3s ease-in;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .tooltip {
+            position: relative;
+            display: inline-block;
+        }
+
+        .tooltip .tooltip-text {
+            visibility: hidden;
+            width: 200px;
+            background-color: rgba(17, 24, 39, 0.9);
+            color: #fff;
+            text-align: center;
+            border-radius: var(--radius-sm);
+            padding: 8px;
+            position: absolute;
+            z-index: 1;
+            bottom: 125%;
+            left: 50%;
+            margin-left: -100px;
+            opacity: 0;
+            transition: opacity 0.3s;
+            font-size: 12px;
+        }
+
+        .tooltip:hover .tooltip-text {
+            visibility: visible;
+            opacity: 1;
+        }
+
+        .footer {
+            padding: 16px 20px;
+            background-color: var(--bg-secondary);
+            border-top: 1px solid var(--border-color);
+            text-align: center;
+            font-size: 12px;
+            color: var(--text-tertiary);
+        }
+
+        .footer a {
+            color: var(--primary-color);
+            text-decoration: none;
+        }
+
+        .footer a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>
+                <svg class="header-icon" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M21.582 6.428l-9-6a1 1 0 00-.992 0l-9 6A1 1 0 002 7v10a2 2 0 002 2h16a2 2 0 002-2V7a1 1 0 00-.418-0.772zM12 4.713L18.01 8H19v2h-2.59l-2.01 2h2.6l2 2h-3.61l-2 2H15v2h-2v-2h-2v2H9v-2H6.41l-2-2h2.61l2-2H6v-2h2.59l2.01-2H5V8h2.01L12 4.713z"></path>
+                </svg>
+                FreeDl - 视频下载器
+            </h1>
+        </div>
+
+        <div class="content">
+            <div id="status" class="status info hidden fade-in">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="display: inline-block; margin-right: 8px; vertical-align: middle;">
+                    <path d="M8 1C4.13401 1 1 4.13401 1 8C1 11.866 4.13401 15 8 15C11.866 15 15 11.866 15 8C15 4.13401 11.866 1 8 1ZM8 13.5C5.41015 13.5 3.5 11.5899 3.5 9C3.5 6.41015 5.41015 4.5 8 4.5C10.5899 4.5 12.5 6.41015 12.5 9C12.5 11.5899 10.5899 13.5 8 13.5ZM8 5.5C6.067 5.5 4.5 7.067 4.5 9C4.5 10.933 6.067 12.5 8 12.5C9.933 12.5 11.5 10.933 11.5 9C11.5 7.067 9.933 5.5 8 5.5ZM7.5 7V9.5L9.5 10.5L10 10.5L10 7L7.5 7Z" fill="currentColor"></path>
+                </svg>
+                正在检测页面中的视频...
+            </div>
+            <div id="videoInfo" class="video-details hidden fade-in">
+                <h3>
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M12.0833 3.08333L8.5 4.75V9.25L12.0833 10.9167V3.08333ZM6.5 1.58333L1.91667 3.5V10.5L6.5 12.4167V1.58333ZM7 2.83333V11.1667L3.08333 9.5V4.5L7 2.83333Z" fill="currentColor"></path>
+                    </svg>
+                    检测到的视频 <span id="videoCountText" class="count-badge"></span>
+                </h3>                
+                <div id="videoUrl" class="video-url"></div>
+                <style>
+                    .url-list { max-height: 200px; overflow-y: auto; margin-top: 8px; }
+                    .url-item { display: flex; align-items: center; padding: 8px 12px; margin-bottom: 4px; background-color: #f5f5f5; border-radius: 4px; cursor: pointer; transition: all 0.2s; font-size: 12px; }
+                    .url-item:hover { background-color: #e3f2fd; }
+                    .url-item.selected { background-color: #bbdefb; border-left: 3px solid #2196f3; }
+                    .url-number { font-weight: bold; margin-right: 8px; color: #666; min-width: 20px; }
+                    .url-text { flex: 1; word-break: break-all; color: #333; }
+                    .url-type { background-color: #4caf50; color: white; padding: 2px 6px; border-radius: 10px; font-size: 10px; margin-left: 8px; }
+                    .url-text-container { display: flex; flex-direction: column; justify-content: center; }
+                    .video-duration { font-size: 11px; color: #4caf50; font-weight: 500; margin-top: 2px; }
+                    .url-item.selected .video-duration { color: #2196f3; }
+                </style>
+            </div>
+
+            <div class="action-section">
+                <button id="downloadBtn" class="btn btn-primary" disabled>
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M8 2.5L4.5 6L5.25 6.75L7.5 4.5V12.5H8.5V4.5L10.75 6.75L11.5 6L8 2.5ZM1.5 13.5H14.5V14.5H1.5V13.5Z" fill="currentColor"></path>
+                    </svg>
+                    开始下载
+                </button>
+            </div>
+
+            <div id="progressContainer" class="progress-section hidden fade-in">
+                <div class="progress-container">
+                    <div id="progressFill" class="progress-bar" style="width: 0%"></div>
+                </div>
+                <div class="progress-info">
+                    <span id="progressText">准备下载...</span>
+                    <span id="progressPercentage">0%</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="footer">
+            <p>
+                支持 m3u8 格式视频下载 |
+                <a href="#" target="_blank">使用帮助</a> |
+                <a id="manualDetectLink"
+                   href="#"
+                   style="color: var(--text-tertiary);"
+                   title="当自动检测未捕获时可手动刷新">刷新检测结果</a>
+            </p>
+        </div>
+    </div>
+
+    <script src="popup.js"></script>
+</body>
+</html>

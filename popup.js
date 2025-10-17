@@ -181,7 +181,7 @@ document.addEventListener('DOMContentLoaded', async function () {
             const response = await chrome.runtime.sendMessage({
                 action: 'downloadM3U8',
                 m3u8Url: currentVideoUrl,
-                videoName: `video_${Date.now()}`
+                videoName: await getDefaultVideoName() || `video_${Date.now()}`,
             });
 
             if (!response.success) {
@@ -196,6 +196,44 @@ document.addEventListener('DOMContentLoaded', async function () {
             downloadBtn.disabled = false;
         }
     }
+
+    async function getDefaultVideoName() {
+    try {
+        const tab = await getActiveTab();
+        const tabTitle = (tab.title || '').trim();
+        if (tabTitle) return sanitizeFileName(tabTitle);
+
+        const [{ result }] = await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            func: () => {
+                const metas = Array.from(document.querySelectorAll('meta'));
+                const getContent = el => (el?.getAttribute('content') || '').trim();
+                const byName = name => metas.find(m => (m.getAttribute('name') || '').toLowerCase() === name);
+                const byProp = prop => metas.find(m => (m.getAttribute('property') || '').toLowerCase() === prop);
+                const byItem = item => metas.find(m => (m.getAttribute('itemprop') || '').toLowerCase() === item);
+
+                const titleCandidates = [
+                    (document.title || '').trim(),
+                    getContent(byProp('og:title')),
+                    getContent(byName('twitter:title')),
+                    getContent(byName('title')),
+                    getContent(byProp('twitter:title')),
+                    getContent(byItem('name')),
+                    getContent(byProp('og:video:title')),
+                    getContent(byName('video:title'))
+                ].filter(Boolean);
+
+                return titleCandidates[0] || '';
+            }
+        });
+
+        if (result && result.trim()) {
+            return sanitizeFileName(result.trim());
+        }
+    } catch (e) {}
+
+    return `video_${Date.now()}`;
+}
 
     function updateProgress(percentage, text) {
         progressFill.style.width = `${percentage}%`;
@@ -362,4 +400,11 @@ document.addEventListener('DOMContentLoaded', async function () {
 function truncateUrl(url, maxLength) {
     if (url.length <= maxLength) return url;
     return url.substring(0, maxLength - 3) + '...';
+}
+
+
+
+
+function sanitizeFileName(name) {
+    return name.replace(/[\\/:*?"<>|]+/g, '_').replace(/\s+/g, ' ').trim().slice(0, 120);
 }

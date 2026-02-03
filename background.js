@@ -292,7 +292,9 @@ async function downloadM3U8Video(m3u8Url, videoName) {
 
         // 清理下载状态
         downloadStates.clear();
-        localStorage.removeItem('m3u8_download_progress');
+        chrome.storage.local.remove('m3u8_download_progress').catch(err =>
+            console.error('Failed to clear download progress:', err)
+        );
 
     } catch (error) {
         console.error('M3U8 download error:', error);
@@ -404,6 +406,11 @@ async function downloadSegments(segmentUrls, failOnError = false) {
             currentChunks = [];
             totalSize = 0;
         }
+
+        // 定期保存进度
+        if (processedCount % 10 === 0) {
+            await saveDownloadProgress(processedCount);
+        }
     }
 
     // 检查是否有失败的片段
@@ -484,7 +491,6 @@ async function downloadSegment(index, url, retries = 3, timeout = 10000) {
                 throw new Error(errorMsg);
             }
 
-            const contentLength = response.headers.get('content-length');
             const data = await response.arrayBuffer();
 
             console.log(`Segment ${index + 1} downloaded successfully, size: ${data.byteLength} bytes`);
@@ -716,21 +722,28 @@ async function downloadWithResume(segmentUrls, startIndex = 0) {
 }
 
 // 保存下载进度
-function saveDownloadProgress(lastIndex) {
-    const progress = {
-        lastIndex: lastIndex,
-        timestamp: Date.now()
-    };
-    localStorage.setItem('m3u8_download_progress', JSON.stringify(progress));
+async function saveDownloadProgress(lastIndex) {
+    try {
+        await chrome.storage.local.set({
+            m3u8_download_progress: {
+                lastIndex: lastIndex,
+                timestamp: Date.now()
+            }
+        });
+    } catch (error) {
+        console.error('Failed to save download progress:', error);
+    }
 }
 
 // 恢复下载进度
-function loadDownloadProgress() {
-    const saved = localStorage.getItem('m3u8_download_progress');
-    if (saved) {
-        return JSON.parse(saved);
+async function loadDownloadProgress() {
+    try {
+        const result = await chrome.storage.local.get('m3u8_download_progress');
+        return result.m3u8_download_progress || null;
+    } catch (error) {
+        console.error('Failed to load download progress:', error);
+        return null;
     }
-    return null;
 }
 
 // 处理扩展图标点击

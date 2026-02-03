@@ -13,6 +13,23 @@ chrome.runtime.onConnect.addListener((port) => {
 // 存储检测到的m3u8 URL
 const detectedUrls = new Map();
 
+// 跟踪当前下载状态
+let currentDownload = {
+    isActive: false,
+    startTime: null,
+    tabId: null,
+    url: null
+};
+
+// 保存当前下载进度信息
+let currentProgress = {
+    percentage: 0,
+    current: 0,
+    total: 0,
+    message: '',
+    lastUpdate: null
+};
+
 // 更全面的m3u8检测函数
 function isM3u8Url(url) {
     if (!url || typeof url !== 'string') return false;
@@ -224,9 +241,33 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             .catch(error => sendResponse({ success: false, error: error.message }));
         return true;
     }
+
+    if (message.action === 'checkDownloadStatus') {
+        sendResponse({
+            isDownloading: currentDownload.isActive,
+            downloadId: null,
+            currentProgress: currentProgress,
+            downloadUrl: currentDownload.url
+        });
+        return true;
+    }
 });
 
 async function downloadM3U8Video(m3u8Url, videoName) {
+    // 检查是否已有下载在进行
+    if (currentDownload.isActive) {
+        console.warn('Download already in progress:', currentDownload.url);
+        throw new Error('已有下载任务正在执行，请稍候再试');
+    }
+
+    // 设置下载状态
+    currentDownload = {
+        isActive: true,
+        startTime: Date.now(),
+        url: m3u8Url,
+        tabId: null // 可以从 message 中获取
+    };
+
     try {
         console.log('Downloading M3U8:', m3u8Url);
 
@@ -290,12 +331,6 @@ async function downloadM3U8Video(m3u8Url, videoName) {
             });
         }
 
-        // 清理下载状态
-        downloadStates.clear();
-        chrome.storage.local.remove('m3u8_download_progress').catch(err =>
-            console.error('Failed to clear download progress:', err)
-        );
-
     } catch (error) {
         console.error('M3U8 download error:', error);
         // Send error message through progress port
@@ -305,7 +340,15 @@ async function downloadM3U8Video(m3u8Url, videoName) {
                 error: error.message
             });
         }
-        throw new Error('Failed to download M3U8 video: ' + error.message);
+        throw error; // 重新抛出错误
+    } finally {
+        // 重置下载状态
+        currentDownload = {
+            isActive: false,
+            startTime: null,
+            url: null,
+            tabId: null
+        };
     }
 }
 
@@ -382,13 +425,23 @@ async function downloadSegments(segmentUrls, failOnError = false) {
         // 更新进度
         if (progressPort) {
             const percentage = Math.round((processedCount / segmentUrls.length) * 100);
-            progressPort.postMessage({
+            const message = {
                 type: 'progress',
                 percentage: percentage,
                 current: processedCount,
                 total: segmentUrls.length,
                 message: `下载中... ${percentage}% (${processedCount}/${segmentUrls.length})`
-            });
+            };
+            progressPort.postMessage(message);
+
+            // 保存当前进度状态
+            currentProgress = {
+                percentage: percentage,
+                current: processedCount,
+                total: segmentUrls.length,
+                message: `下载中... ${percentage}%`,
+                lastUpdate: Date.now()
+            };
         }
 
         // 当达到内存限制时，合并当前chunks并创建临时blob

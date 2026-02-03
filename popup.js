@@ -20,6 +20,7 @@ document.addEventListener('DOMContentLoaded', async function () {
     let isDownloading = false; // 跟踪下载状态
     let currentDownloadId = null; // 当前下载任务ID
     let downloadStartTime = null; // 下载开始时间
+    let initialProgress = null; // 初始进度信息
 
     // 数据列表
     let allVideoUrls = []; // 存储所有检测到的视频列表
@@ -46,12 +47,26 @@ document.addEventListener('DOMContentLoaded', async function () {
                     const percentage = message.percentage || 0;
                     const text = message.message || `下载中... ${percentage}% (${message.current || 0}/${message.total || 0})`;
                     updateProgress(percentage, text);
+                    isDownloading = percentage < 100;
+
+                    // 如果下载完成，重置状态
+                    if (percentage >= 100) {
+                        setTimeout(() => {
+                            isDownloading = false;
+                            currentDownloadId = null;
+                        }, 3000);
+                    }
                 } else if (message.type === 'error') {
                     showStatus('下载失败: ' + message.error, 'error');
                     downloadBtn.disabled = false;
                     progressContainer.classList.add('hidden');
+
+                    // 下载失败时重置状态
+                    isDownloading = false;
+                    currentDownloadId = null;
                 }
             });
+
             progressPort.onDisconnect.addListener(() => {
                 progressPort = null;
                 // Try to reconnect after a delay
@@ -64,8 +79,23 @@ document.addEventListener('DOMContentLoaded', async function () {
         } catch (error) {
             console.error('Failed to connect progress port:', error);
         }
-    }
 
+        // 弹出窗口时检查是否有正在进行的下载
+        chrome.runtime.sendMessage({ action: 'checkDownloadStatus' }, (response) => {
+            if (response && response.isDownloading) {
+                showStatus('检测到正在进行的下载，请稍候或等待下载完成', 'info');
+                isDownloading = true;
+
+                // 如果有当前进度，立即显示
+                if (response.currentProgress && response.currentProgress.percentage > 0) {
+                    currentDownloadId = null; // 为了简化，不保存 ID
+                    const progress = response.currentProgress;
+                    progressContainer.classList.remove('hidden');
+                    updateProgress(progress.percentage, progress.message);
+                }
+            }
+        });
+    }
 
     // 优化后的视频检测主流程
     async function detectVideo(action = 'quickDetectVideo') {
@@ -143,7 +173,7 @@ document.addEventListener('DOMContentLoaded', async function () {
         const preferred = validVideoUrls.find(item => {
             const url = typeof item === 'object' ? item.url : item;
             return url && url.includes('.m3u8');
-        }) ?? videoUrls[0];
+        }) ?? videoUrlsOrgin[0];
 
         currentVideoUrl = typeof preferred === 'object' ? preferred.url : preferred;
 
@@ -187,7 +217,17 @@ document.addEventListener('DOMContentLoaded', async function () {
             return;
         }
 
+        // 检查是否已有下载在进行
+        if (isDownloading) {
+            showStatus('当前已有下载任务在进行中，请稍候...', 'warning');
+            return;
+        }
+
         try {
+            isDownloading = true;
+            currentDownloadId = Date.now();
+            downloadStartTime = Date.now();
+
             downloadBtn.disabled = true;
             progressContainer.classList.remove('hidden');
             showStatus('正在启动下载...', 'info');
@@ -208,6 +248,13 @@ document.addEventListener('DOMContentLoaded', async function () {
             console.error('启动下载失败:', error);
             showStatus('启动下载失败: ' + error.message, 'error');
             downloadBtn.disabled = false;
+
+            // 重置下载状态
+            isDownloading = false;
+            currentDownloadId = null;
+            downloadStartTime = null;
+            progressContainer.classList.add('hidden');
+
         }
     }
 
@@ -250,6 +297,11 @@ document.addEventListener('DOMContentLoaded', async function () {
     }
 
     function updateProgress(percentage, text) {
+        // 确保是当前有效的下载进度
+        if (!isDownloading || percentage < 0 || percentage > 100) {
+            return;
+        }
+
         progressFill.style.width = `${percentage}%`;
         progressText.textContent = text;
 
@@ -261,6 +313,16 @@ document.addEventListener('DOMContentLoaded', async function () {
         if (percentage === 100) {
             showStatus('下载完成！', 'success');
             downloadBtn.disabled = false;
+
+            // 清空下载状态
+            isDownloading = false;
+            currentDownloadId = null;
+            downloadStartTime = null;
+
+            // 3秒后隐藏进度条
+            setTimeout(() => {
+                progressContainer.classList.add('hidden');
+            }, 3000);
         }
     }
 
@@ -407,17 +469,12 @@ document.addEventListener('DOMContentLoaded', async function () {
     }
 });
 
-
-
 // 辅助函数：截断URL
 function truncateUrl(url, maxLength) {
     if (url.length <= maxLength) return url;
     return url.substring(0, maxLength - 3) + '...';
 }
 
-
-
-
 function sanitizeFileName(name) {
-    return name.replace(/[\\/:*?"<>|]+/g, '_').replace(/\s+/g, ' ').trim().slice(0, 120);
+    return name.replace(/[\\:*?"<>|]+/g, '_').replace(/\s+/g, ' ').trim().slice(0, 120);
 }

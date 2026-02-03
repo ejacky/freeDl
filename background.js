@@ -230,6 +230,16 @@ async function downloadM3U8Video(m3u8Url, videoName) {
     try {
         console.log('Downloading M3U8:', m3u8Url);
 
+        // 首先检查文件大小
+        const headResponse = await fetch(m3u8Url, { method: 'HEAD' });
+        const contentLength = headResponse.headers.get('content-length');
+        if (contentLength) {
+            const sizeMB = parseInt(contentLength) / 1024 / 1024;
+            console.log(`M3U8 playlist size: ${sizeMB.toFixed(2)}MB`);
+        } else {
+            console.log('M3U8 playlist size not available from headers');
+        }
+
         const response = await fetch(m3u8Url);
         const m3u8Content = await response.text();
 
@@ -243,30 +253,46 @@ async function downloadM3U8Video(m3u8Url, videoName) {
 
         console.log('Found segments:', segmentUrls.length);
 
-        const videoBlob = await downloadSegments(segmentUrls);
+        // 估算文件大小
+        const estimatedSize = segmentUrls.length * 5 * 1024 * 1024; // 假设每个片段5MB
+        console.log(`Estimated video size: ${(estimatedSize / 1024 / 1024).toFixed(2)}MB`);
+
+        // 如果文件太大，警告用户
+        if (estimatedSize > 500 * 1024 * 1024) { // 500MB
+            console.warn(`Large file detected: ${(estimatedSize / 1024 / 1024).toFixed(2)}MB`);
+            // 这里可以添加用户确认逻辑
+        }
+
+        // 设置下载选项 - 是否跳过失败的片段
+        const FAIL_ON_ERROR = false; // 设置为true时，任何片段失败都会停止整个下载
+
+        const videoBlob = await downloadSegments(segmentUrls, FAIL_ON_ERROR);
 
         const filename = `${videoName}.mp4`;
 
-        const blobUrl = await createBlobUrl(videoBlob);
+        //const blobUrl = await createBlobUrl(videoBlob);
+        console.log('[DOWNLOAD] Video Blob size:', videoBlob.size, 'bytes');
 
-        await chrome.downloads.download({
-            url: blobUrl,
-            filename: filename,
-            saveAs: false
-        });
+        // 如果blob太大，使用流式下载
+        if (videoBlob.size > 200 * 1024 * 1024) { // 200MB
+            console.log('[DOWNLOAD] Large file, using stream download...');
+            await downloadLargeFile(videoBlob, filename);
+        } else {
+            // 使用 FileReader 将 Blob 转换为 data URL
+            console.log('[DOWNLOAD] Converting blob to data URL...');
+            const blobUrl = await createBlobUrl(videoBlob);
+            console.log('[DOWNLOAD] Blob URL created');
 
-        // Send completion message
-        // if (progressPort) {
-        //     progressPort.postMessage({
-        //         type: 'progress',
-        //         percentage: 100,
-        //         current: segmentUrls.length,
-        //         total: segmentUrls.length,
-        //         message: '下载完成！'
-        //     });
-        // }
+            await chrome.downloads.download({
+                url: blobUrl,
+                filename: filename,
+                saveAs: false
+            });
+        }
 
-        // Data URLs don't need revocation
+        // 清理下载状态
+        downloadStates.clear();
+        localStorage.removeItem('m3u8_download_progress');
 
     } catch (error) {
         console.error('M3U8 download error:', error);
@@ -281,58 +307,207 @@ async function downloadM3U8Video(m3u8Url, videoName) {
     }
 }
 
-async function downloadSegments(segmentUrls) {
-    const chunks = [];
+// 大文件流式下载
+async function downloadLargeFile(blob, filename) {
+    console.log('[DOWNLOAD] Processing large file, size:', blob.size, 'bytes');
 
-    for (let i = 0; i < segmentUrls.length; i++) {
-        try {
-            console.log(`Downloading segment ${i + 1}/${segmentUrls.length}`);
+    // 对于大文件，我们直接使用 FileReader 处理
+    const dataUrl = await createBlobUrl(blob);
 
-            // Send progress update
-            if (progressPort) {
-                const percentage = Math.round((i / segmentUrls.length) * 100);
-                progressPort.postMessage({
-                    type: 'progress',
-                    percentage: percentage,
-                    current: i,
-                    total: segmentUrls.length
-                });
+    await chrome.downloads.download({
+        url: dataUrl,
+        filename: filename,
+        saveAs: false
+    });
+}
+
+// 分段下载并合并，限制内存使用
+async function downloadSegments(segmentUrls, failOnError = false) {
+    const CHUNK_SIZE = 50 * 1024 * 1024; // 每次处理50MB
+    const MAX_SEGMENTS_IN_MEMORY = 100;  // 内存中最多保持100个片段
+    const CONCURRENT_DOWNLOADS = 3;     // 并发下载数
+    let currentChunks = [];
+    let totalSize = 0;
+    let processedCount = 0;
+    let failedIndices = new Set(); // 记录下载失败的索引
+
+    // 使用临时数组存储分段
+    const tempBlobs = [];
+
+    // 分段并发下载，带错误处理
+    for (let i = 0; i < segmentUrls.length; i += CONCURRENT_DOWNLOADS) {
+        const batchPromises = [];
+        const batchIndices = [];
+
+        // 创建并发下载任务
+        for (let j = 0; j < CONCURRENT_DOWNLOADS && i + j < segmentUrls.length; j++) {
+            const index = i + j;
+            batchIndices.push(index);
+            batchPromises.push(downloadSegment(index, segmentUrls[index]));
+        }
+
+        // 等待批量下载完成
+        const results = await Promise.allSettled(batchPromises);
+
+        for (let k = 0; k < results.length; k++) {
+            const result = results[k];
+            const index = batchIndices[k];
+
+            if (result.status === 'fulfilled') {
+                const chunk = result.value;
+                currentChunks.push(chunk);
+                totalSize += chunk.byteLength;
+                processedCount++;
+            } else {
+                console.error(`Segment ${index + 1} failed:`, result.reason);
+                failedIndices.add(index);
+
+                if (failOnError) {
+                    // 如果设置了失败即停止，则抛出错误
+                    throw new Error(`Segment ${index + 1} failed: ${result.reason.message}`);
+                }
+
+                // 发送错误信息但不停止下载
+                if (progressPort) {
+                    progressPort.postMessage({
+                        type: 'error',
+                        error: `Segment ${index + 1} failed: ${result.reason.message}`.slice(0, 100) // 限制长度
+                    });
+                }
+            }
+        }
+
+        // 更新进度
+        if (progressPort) {
+            const percentage = Math.round((processedCount / segmentUrls.length) * 100);
+            progressPort.postMessage({
+                type: 'progress',
+                percentage: percentage,
+                current: processedCount,
+                total: segmentUrls.length,
+                message: `下载中... ${percentage}% (${processedCount}/${segmentUrls.length})`
+            });
+        }
+
+        // 当达到内存限制时，合并当前chunks并创建临时blob
+        if (currentChunks.length >= MAX_SEGMENTS_IN_MEMORY || totalSize >= CHUNK_SIZE || i + CONCURRENT_DOWNLOADS >= segmentUrls.length) {
+            console.log(`Merging ${currentChunks.length} segments, size: ${(totalSize / 1024 / 1024).toFixed(2)}MB`);
+
+            const combinedArray = new Uint8Array(totalSize);
+            let offset = 0;
+            for (const chunk of currentChunks) {
+                combinedArray.set(new Uint8Array(chunk), offset);
+                offset += chunk.byteLength;
             }
 
-            const response = await fetch(segmentUrls[i]);
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status} for segment ${i + 1}`);
-            }
-
-            const chunk = await response.arrayBuffer();
-            chunks.push(chunk);
-
-        } catch (error) {
-            console.error(`Failed to download segment ${i + 1}:`, error);
-            throw new Error(`Segment download failed at ${i + 1}/${segmentUrls.length}`);
+            tempBlobs.push(new Blob([combinedArray]));
+            currentChunks = [];
+            totalSize = 0;
         }
     }
 
-    // Send final progress update
+    // 检查是否有失败的片段
+    if (failedIndices.size > 0) {
+        console.warn(`Total failed segments: ${failedIndices.size}/${segmentUrls.length}`);
+
+        // 如果失败太多，抛出警告
+        if (failedIndices.size > segmentUrls.length * 0.2) { // 超过20%失败
+            throw new Error(`Too many segments failed (${failedIndices.size}/${segmentUrls.length})`);
+        }
+
+        // 提示用户有部分片段缺失
+        if (progressPort) {
+            progressPort.postMessage({
+                type: 'error',
+                error: `Warning: ${failedIndices.size} segments failed to download. Video may have gaps.`
+            });
+        }
+    }
+
+    // 发送最终进度更新
     if (progressPort) {
         progressPort.postMessage({
             type: 'progress',
             percentage: 100,
-            current: segmentUrls.length,
-            total: segmentUrls.length
+            current: processedCount,
+            total: segmentUrls.length,
+            message: failedIndices.size > 0 ?
+                `下载完成！有 ${failedIndices.size} 个片段下载失败` :
+                '下载完成！'
         });
     }
 
-    const totalLength = chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0);
-    const combinedArray = new Uint8Array(totalLength);
-
-    let offset = 0;
-    for (const chunk of chunks) {
-        combinedArray.set(new Uint8Array(chunk), offset);
-        offset += chunk.byteLength;
+    // 合并所有临时blobs
+    if (tempBlobs.length === 1) {
+        return tempBlobs[0];
+    } else {
+        console.log(`Combining ${tempBlobs.length} blob parts...`);
+        return new Blob(tempBlobs, { type: 'video/mp4' });
     }
+}
 
-    return new Blob([combinedArray], { type: 'video/mp4' });
+// 下载单个片段，带重试机制
+async function downloadSegment(index, url, retries = 3, timeout = 10000) {
+    console.log(`Downloading segment ${index + 1}: ${url}`);
+
+    for (let attempt = 1; attempt <= retries; attempt++) {
+        try {
+            // 创建超时控制器
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+            const response = await fetch(url, {
+                signal: controller.signal,
+                headers: {
+                    'Range': 'bytes=0-' // 尝试获取完整内容
+                }
+            });
+
+            clearTimeout(timeoutId);
+
+            if (!response.ok) {
+                const errorMsg = `HTTP ${response.status} for segment ${index + 1}`;
+                console.error(errorMsg);
+
+                if (response.status === 404 || response.status === 403) {
+                    // 404和403错误不重试
+                    throw new Error(errorMsg);
+                }
+
+                // 其他错误重试
+                if (attempt < retries) {
+                    console.log(`Retrying segment ${index + 1}, attempt ${attempt + 1}/${retries}`);
+                    await new Promise(resolve => setTimeout(resolve, 2000 * attempt)); // 指数退避
+                    continue;
+                }
+
+                throw new Error(errorMsg);
+            }
+
+            const contentLength = response.headers.get('content-length');
+            const data = await response.arrayBuffer();
+
+            console.log(`Segment ${index + 1} downloaded successfully, size: ${data.byteLength} bytes`);
+
+            // 验证下载的数据
+            if (data.byteLength === 0) {
+                throw new Error(`Segment ${index + 1} is empty`);
+            }
+
+            console.log(`Segment ${index + 1} completed, size: ${data.byteLength} bytes`);
+            return data;
+
+        } catch (error) {
+            console.error(`Failed to download segment ${index + 1} on attempt ${attempt}:`, error);
+
+            if (attempt >= retries) {
+                throw new Error(`Failed after ${retries} attempts: ${error.message}`);
+            }
+
+            // 等待后重试
+            await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+        }
+    }
 }
 
 function parseM3U8(content, baseUrl) {
@@ -340,26 +515,113 @@ function parseM3U8(content, baseUrl) {
     const segments = [];
     let basePath = baseUrl.substring(0, baseUrl.lastIndexOf('/') + 1);
 
+    // 尝试从 baseUrl 获取域名
+    let baseOrigin = '';
+    try {
+        const baseUrlObj = new URL(baseUrl);
+        baseOrigin = baseUrlObj.origin;
+    } catch (e) {
+        console.warn('Invalid base URL:', baseUrl);
+    }
+
+    let currentSegmentLine = '';
+
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i].trim();
 
-        if (line.startsWith('#EXTINF:')) {
-            const nextLine = lines[i + 1];
-            if (nextLine && !nextLine.startsWith('#')) {
-                let segmentUrl = nextLine.trim();
-
-                if (!segmentUrl.startsWith('http')) {
-                    if (segmentUrl.startsWith('/')) {
-                        const baseUrlObj = new URL(baseUrl);
-                        segmentUrl = baseUrlObj.origin + segmentUrl;
-                    } else {
-                        segmentUrl = basePath + segmentUrl;
-                    }
-                }
-
-                segments.push(segmentUrl);
+        // 处理相对路径的 #EXT-X-KEY
+        if (line.startsWith('#EXT-X-KEY:')) {
+            const uriMatch = line.match(/URI="([^"]+)"/);
+            if (uriMatch && uriMatch[1] && !uriMatch[1].startsWith('http')) {
+                console.warn('Encryption key might use relative path:', uriMatch[1]);
             }
         }
+
+        if (line.startsWith('#EXTINF:')) {
+            // 保存当前行的信息
+            currentSegmentLine = line;
+        } else if (line && !line.startsWith('#') && currentSegmentLine) {
+            // 这是片段URL行
+            let segmentUrl = line.trim();
+
+            // 验证URL
+            if (!segmentUrl || segmentUrl === '') {
+                console.warn(`Empty segment URL at line ${i + 1}`);
+                continue;
+            }
+
+            // 处理相对路径
+            if (!segmentUrl.startsWith('http')) {
+                if (segmentUrl.startsWith('/')) {
+                    // 绝对路径
+                    if (baseOrigin) {
+                        segmentUrl = baseOrigin + segmentUrl;
+                    } else {
+                        // 如果没有 origin，尝试拼接
+                        const match = baseUrl.match(/^(https?:\/\/[^\/]+)/);
+                        if (match) {
+                            segmentUrl = match[1] + segmentUrl;
+                        } else {
+                            segmentUrl = basePath + segmentUrl;
+                        }
+                    }
+                } else if (segmentUrl.startsWith('../')) {
+                    // 处理上级目录
+                    const levels = (segmentUrl.match(/\.\.\//g) || []).length;
+                    let newBasePath = basePath;
+                    for (let l = 0; l < levels; l++) {
+                        newBasePath = newBasePath.replace(/[^\/]*\/$/, '');
+                    }
+                    segmentUrl = newBasePath + segmentUrl.replace(/\.\.\//g, '');
+                } else {
+                    // 相对路径
+                    segmentUrl = basePath + segmentUrl;
+                }
+            }
+
+            // 验证最终URL
+            try {
+                new URL(segmentUrl);
+                segments.push(segmentUrl);
+                console.log(`Added segment ${segments.length}: ${segmentUrl}`);
+            } catch (e) {
+                console.error(`Invalid segment URL after processing: ${segmentUrl}`);
+            }
+
+            currentSegmentLine = '';
+        }
+    }
+
+    // 如果没有找到片段，尝试其他可能的格式
+    if (segments.length === 0) {
+        console.warn('No segments found in standard format, trying alternative parsing...');
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].trim();
+
+            // 尝试查找任何不以 # 开头的非空行作为可能的片段URL
+            if (line && !line.startsWith('#') && line.includes('.ts')) {
+                let segmentUrl = line;
+
+                if (!segmentUrl.startsWith('http')) {
+                    segmentUrl = basePath + segmentUrl;
+                }
+
+                try {
+                    new URL(segmentUrl);
+                    segments.push(segmentUrl);
+                    console.log(`Found alternative segment: ${segmentUrl}`);
+                } catch (e) {
+                    console.warn(`Invalid alternative segment URL: ${segmentUrl}`);
+                }
+            }
+        }
+    }
+
+    if (segments.length === 0) {
+        console.error('No valid segments found in M3U8 content');
+        console.log('First 10 lines of M3U8 content:');
+        console.log(lines.slice(0, 10).join('\n'));
     }
 
     return segments;
@@ -382,16 +644,14 @@ async function handleDownloadRequest(url, downloadPath) {
         console.log('收到下载请求:', { url, downloadPath });
 
         chrome.downloads.download({
-            url: message.url,             // 要下载的文件URL
-            filename: message.filename || "downloaded_file.txt", // 自定义文件名（可选）
-            saveAs: false                 // 是否弹出“另存为”对话框
+            url: url,             // 要下载的文件URL
+            filename: downloadPath || "downloaded_file.txt", // 自定义文件名（可选）
+            saveAs: false                 // 是否弹出"另存为"对话框
         }, (downloadId) => {
             if (chrome.runtime.lastError) {
                 console.error("Download failed:", chrome.runtime.lastError.message);
-                sendResponse({ ok: false, error: chrome.runtime.lastError.message });
             } else {
                 console.log("Download started:", downloadId);
-                sendResponse({ ok: true, id: downloadId });
             }
         });
 
@@ -408,13 +668,70 @@ async function handleDownloadRequest(url, downloadPath) {
     }
 }
 
-// 监听标签页更新，用于检测页面变化
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-    if (changeInfo.status === 'complete' && tab.url) {
-        // 页面加载完成，可以通知内容脚本进行检测
-        console.log('页面加载完成:', tab.url);
+// 添加下载状态管理
+let downloadStates = new Map();
+
+// 断点续传功能
+async function downloadWithResume(segmentUrls, startIndex = 0) {
+    const chunks = [];
+    let failedSegments = [];
+
+    for (let i = startIndex; i < segmentUrls.length; i++) {
+        try {
+            console.log(`Downloading segment ${i + 1}/${segmentUrls.length}`);
+
+            // 检查是否已经下载过
+            if (downloadStates.has(i)) {
+                console.log(`Segment ${i} already downloaded, skipping...`);
+                chunks.push(downloadStates.get(i));
+                continue;
+            }
+
+            const response = await fetch(segmentUrls[i]);
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status} for segment ${i + 1}`);
+            }
+
+            const chunk = await response.arrayBuffer();
+            chunks.push(chunk);
+
+            // 保存已下载的片段到状态
+            downloadStates.set(i, chunk);
+
+        } catch (error) {
+            console.error(`Failed to download segment ${i + 1}:`, error);
+            failedSegments.push(i);
+
+            // 跳过失败的片段继续下载
+            continue;
+        }
+
+        // 定期保存进度
+        if (i % 10 === 0) {
+            saveDownloadProgress(i);
+        }
     }
-});
+
+    return { chunks, failedSegments };
+}
+
+// 保存下载进度
+function saveDownloadProgress(lastIndex) {
+    const progress = {
+        lastIndex: lastIndex,
+        timestamp: Date.now()
+    };
+    localStorage.setItem('m3u8_download_progress', JSON.stringify(progress));
+}
+
+// 恢复下载进度
+function loadDownloadProgress() {
+    const saved = localStorage.getItem('m3u8_download_progress');
+    if (saved) {
+        return JSON.parse(saved);
+    }
+    return null;
+}
 
 // 处理扩展图标点击
 chrome.action.onClicked.addListener((tab) => {

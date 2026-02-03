@@ -10,10 +10,10 @@ document.addEventListener('DOMContentLoaded', async function () {
     const manualDetectLink = document.getElementById('manualDetectLink');
     const serverUrlInput = document.getElementById('serverUrl');
     const downloadPathInput = document.getElementById('downloadPath');
-    const manualDetectBtn = document.getElementById('manualDetectBtn');
+    // const manualDetectBtn = document.getElementById('manualDetectBtn'); // Commented out - not used
 
     let currentVideoUrl = null;
-    let downloadProgress = null;
+    // let downloadProgress = null; // Commented out - not used
     let progressPort = null;
 
     // 连接进度端口
@@ -30,7 +30,7 @@ document.addEventListener('DOMContentLoaded', async function () {
     downloadPathInput.addEventListener('change', saveSettings);
 
     // 取消设置功能：将相关函数置空（如仍有引用可安全无效化）
-    async function loadSettings() {}
+    // async function loadSettings() {} // Commented out - not used
     async function saveSettings() {}
 
     function connectProgressPort() {
@@ -251,7 +251,7 @@ document.addEventListener('DOMContentLoaded', async function () {
     }
 
     // 监听来自后台脚本的消息
-    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    chrome.runtime.onMessage.addListener((message) => {
         if (message.action === 'downloadProgress') {
             const progress = message.progress;
             updateProgress(progress.percentage, progress.text);

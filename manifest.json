@@ -9,7 +9,8 @@
     "scripting",
     "webRequest",
     "debugger",
-    "downloads"
+    "downloads",
+    "offscreen"
   ],
   "host_permissions": [
     "http://localhost:*/*",
@@ -46,7 +47,8 @@
   "web_accessible_resources": [
     {
       "resources": [
-        "popup.html"
+        "popup.html",
+        "offscreen.html"
       ],
       "matches": [
         "<all_urls>"

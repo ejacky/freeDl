@@ -1,14 +1,49 @@
 // background.js - Chrome扩展后台脚本
 let progressPort = null;
+let offscreenDocument = null;
 
-chrome.runtime.onConnect.addListener((port) => {
-    if (port.name === 'downloadProgress') {
-        progressPort = port;
-        port.onDisconnect.addListener(() => {
-            progressPort = null;
-        });
+// Offscreen document management functions
+async function getOrCreateOffscreenDocument() {
+    if (offscreenDocument) {
+        return offscreenDocument;
     }
-});
+
+    try {
+        const existingContexts = await chrome.runtime.getContexts({
+            contextTypes: ['OFFSCREEN_DOCUMENT'],
+            documentUrls: [chrome.runtime.getURL('offscreen.html')]
+        });
+
+        if (existingContexts.length > 0) {
+            offscreenDocument = existingContexts[0];
+            return offscreenDocument;
+        }
+
+        const created = await chrome.offscreen.createDocument({
+            url: 'offscreen.html',
+            reasons: ['BLOBS'],
+            justification: 'Download large files with stream processing to avoid memory limitations'
+        });
+
+        offscreenDocument = created;
+        return offscreenDocument;
+    } catch (error) {
+        console.error('[BACKGROUND] Failed to create offscreen document:', error);
+        throw error;
+    }
+}
+
+async function closeOffscreenDocument() {
+    if (offscreenDocument) {
+        try {
+            await chrome.offscreen.closeDocument();
+            offscreenDocument = null;
+            console.log('[BACKGROUND] Offscreen document closed');
+        } catch (error) {
+            console.warn('[BACKGROUND] Error closing offscreen document:', error);
+        }
+    }
+}
 
 // 存储检测到的m3u8 URL
 const detectedUrls = new Map();
@@ -251,6 +286,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         });
         return true;
     }
+
+    if (message.action === 'testStreamDownload') {
+        console.log('[BACKGROUND] Received test stream download request');
+        runStreamDownloadTest().then(result => {
+            sendResponse(result);
+        }).catch(error => {
+            sendResponse({ success: false, error: error.message });
+        });
+        return true;
+    }
 });
 
 async function downloadM3U8Video(m3u8Url, videoName) {
@@ -298,38 +343,41 @@ async function downloadM3U8Video(m3u8Url, videoName) {
         const estimatedSize = segmentUrls.length * 5 * 1024 * 1024; // 假设每个片段5MB
         console.log(`Estimated video size: ${(estimatedSize / 1024 / 1024).toFixed(2)}MB`);
 
-        // 如果文件太大，警告用户
-        if (estimatedSize > 500 * 1024 * 1024) { // 500MB
-            console.warn(`Large file detected: ${(estimatedSize / 1024 / 1024).toFixed(2)}MB`);
-            // 这里可以添加用户确认逻辑
+        const filename = `${videoName}.mp4`;
+
+        // 对于大文件使用流式下载（超过100个片段或预估大小超过500MB）
+        if (segmentUrls.length > 100 || estimatedSize > 500 * 1024 * 1024) {
+            console.log('[DOWNLOAD] Large file detected, using offscreen stream download...');
+
+            try {
+                await downloadM3U8WithStream(segmentUrls, filename, estimatedSize);
+                return; // Exit after successful stream download
+            } catch (streamError) {
+                console.error('[DOWNLOAD] Stream download failed, falling back to traditional download:', streamError);
+                // Continue with traditional download as fallback
+            }
         }
+
+        // 对于小文件使用传统方法
+        console.log('[DOWNLOAD] Using traditional blob-based download...');
 
         // 设置下载选项 - 是否跳过失败的片段
         const FAIL_ON_ERROR = false; // 设置为true时，任何片段失败都会停止整个下载
 
         const videoBlob = await downloadSegments(segmentUrls, FAIL_ON_ERROR);
 
-        const filename = `${videoName}.mp4`;
-
-        //const blobUrl = await createBlobUrl(videoBlob);
         console.log('[DOWNLOAD] Video Blob size:', videoBlob.size, 'bytes');
 
-        // 如果blob太大，使用流式下载
-        if (videoBlob.size > 200 * 1024 * 1024) { // 200MB
-            console.log('[DOWNLOAD] Large file, using stream download...');
-            await downloadLargeFile(videoBlob, filename);
-        } else {
-            // 使用 FileReader 将 Blob 转换为 data URL
-            console.log('[DOWNLOAD] Converting blob to data URL...');
-            const blobUrl = await createBlobUrl(videoBlob);
-            console.log('[DOWNLOAD] Blob URL created');
+        // 使用 FileReader 将 Blob 转换为 data URL
+        console.log('[DOWNLOAD] Converting blob to data URL...');
+        const blobUrl = await createBlobUrl(videoBlob);
+        console.log('[DOWNLOAD] Blob URL created');
 
-            await chrome.downloads.download({
-                url: blobUrl,
-                filename: filename,
-                saveAs: false
-            });
-        }
+        await chrome.downloads.download({
+            url: blobUrl,
+            filename: filename,
+            saveAs: false
+        });
 
     } catch (error) {
         console.error('M3U8 download error:', error);
@@ -364,6 +412,95 @@ async function downloadLargeFile(blob, filename) {
         filename: filename,
         saveAs: false
     });
+}
+
+// Stream-based M3U8 download using offscreen document
+async function downloadM3U8WithStream(segmentUrls, filename, estimatedSize) {
+    console.log('[BACKGROUND] Starting stream-based M3U8 download...');
+
+    try {
+        // Get or create offscreen document
+        await getOrCreateOffscreenDocument();
+        console.log('[BACKGROUND] Offscreen document ready');
+
+        // Wait a moment to ensure offscreen is fully loaded
+        await new Promise(resolve => setTimeout(resolve, 100));
+        console.log('[BACKGROUND] Offscreen document initialized, sending download request');
+
+        // Send download request to offscreen document and wait for result
+        console.log('[BACKGROUND] Setting up message listener and sending request');
+
+        try {
+            const result = await new Promise((resolve, reject) => {
+            // Set up one-time message listener for the result
+            const messageListener = (message, sender) => {
+                if (message.action === 'streamDownloadProgress' && sender.id === chrome.runtime.id) {
+                    if (message.data.type === 'downloadComplete') {
+                        chrome.runtime.onMessage.removeListener(messageListener);
+                        // Filter out blobs as they cannot be transferred via chrome messages
+                        resolve({ blobs: message.data.blobs, totalSize: message.data.totalSize });
+                    } else if (message.data.type === 'progress') {
+                        // Forward progress to popup
+                        if (progressPort) {
+                            progressPort.postMessage(message.data);
+                        }
+                    } else if (message.data.type === 'error') {
+                        chrome.runtime.onMessage.removeListener(messageListener);
+                        reject(new Error(message.data.error));
+                    } else if (message.data.type === 'cancelled') {
+                        chrome.runtime.onMessage.removeListener(messageListener);
+                        resolve({ cancelled: true });
+                    }
+                    // Return true to indicate we handled this message
+                    return true;
+                } else {
+                    // Not our message type
+                    console.log('[BACKGROUND] Ignoring message:', message);
+                    return false;
+                }
+            };
+
+            chrome.runtime.onMessage.addListener(messageListener);
+
+            // Send download request to offscreen document
+            console.log('[BACKGROUND] Sending message to offscreen document...');
+
+            chrome.runtime.sendMessage({
+                action: 'startStreamDownload',
+                segments: segmentUrls,
+                filename: filename,
+                estimatedSize: estimatedSize
+            });
+
+            // Errors will bubble up via the promise reject
+
+            // Timeout after 30 minutes for very large files
+            setTimeout(() => {
+                chrome.runtime.onMessage.removeListener(messageListener);
+                reject(new Error('Download timeout - operation took too long'));
+            }, 30 * 60 * 1000);
+        });
+
+        if (result.cancelled) {
+            throw new Error('Download was cancelled');
+        }
+
+        console.log('[BACKGROUND] Stream download completed successfully, received', result.blobs?.length || '0', 'blobs');
+
+        // Download each blob as a part or merge them
+        await downloadBlobsAsParts(result.blobs, filename);
+
+        console.log('[BACKGROUND] All blobs downloaded successfully');
+        return result;
+
+    } catch (error) {
+        console.error('[BACKGROUND] Stream download error:', error);
+        console.error('[BACKGROUND] Error details:', {
+            message: error.message,
+            stack: error.stack
+        });
+        throw error;
+    }
 }
 
 // 分段下载并合并，限制内存使用
@@ -803,3 +940,42 @@ async function loadDownloadProgress() {
 chrome.action.onClicked.addListener((tab) => {
     console.log('扩展图标被点击，当前标签页:', tab.url);
 });
+
+// Clean up on extension suspend
+chrome.runtime.onSuspend.addListener(() => {
+    console.log('[BACKGROUND] Extension suspending, cleaning up...');
+    closeOffscreenDocument();
+});
+
+// Handle extension shutdown
+chrome.runtime.onInstalled.addListener((details) => {
+    if (details.reason === 'update') {
+        console.log('[BACKGROUND] Extension updated, cleaning up old resources...');
+        closeOffscreenDocument();
+    }
+});
+
+async function runStreamDownloadTest() {
+    // Simple test without complex messaging - we'll use the actual stream download flow
+    console.log('[BACKGROUND] Running stream download test');
+
+    // Create test data
+    const testSegments = [
+        'https://example.com/segment1.ts',
+        'https://example.com/segment2.ts',
+        'https://example.com/segment3.ts'
+    ];
+
+    try {
+        await getOrCreateOffscreenDocument();
+        console.log('[BACKGROUND] Offscreen document ready for test');
+
+        // Let's try the actual stream download with test data
+        await downloadM3U8WithStream(testSegments, 'test_video.mp4', 15000000);
+
+        return { success: true, message: 'Stream download test completed' };
+    } catch (error) {
+        console.error('[BACKGROUND] Stream test error:', error);
+        return { success: false, error: error.message };
+    }
+}

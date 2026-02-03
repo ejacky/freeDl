@@ -478,3 +478,25 @@ function truncateUrl(url, maxLength) {
 function sanitizeFileName(name) {
     return name.replace(/[\\:*?"<>|]+/g, '_').replace(/\s+/g, ' ').trim().slice(0, 120);
 }
+
+// Test stream download button
+const testStreamBtn = document.getElementById('testStreamBtn');
+const debugInfo = document.getElementById('debugInfo');
+
+if (testStreamBtn) {
+    testStreamBtn.addEventListener('click', async () => {
+        try {
+            console.log('[POPUP] Testing stream download...');
+            debugInfo.textContent = 'Testing stream download...';
+
+            // Send test message to background
+            chrome.runtime.sendMessage({ action: 'testStreamDownload' }, response => {
+                console.log('[POPUP] Test response:', response);
+                debugInfo.textContent = response ? JSON.stringify(response, null, 2) : 'No response';
+            });
+        } catch (error) {
+            console.error('[POPUP] Test failed:', error);
+            debugInfo.textContent = 'Error: ' + error.message;
+        }
+    });
+}

@@ -16,6 +16,18 @@ document.addEventListener('DOMContentLoaded', async function () {
     // let downloadProgress = null; // Commented out - not used
     let progressPort = null;
 
+    // 下载状态控制
+    let isDownloading = false; // 跟踪下载状态
+    let currentDownloadId = null; // 当前下载任务ID
+    let downloadStartTime = null; // 下载开始时间
+
+    // 数据列表
+    let allVideoUrls = []; // 存储所有检测到的视频列表
+    let filteredVideoUrls = []; // 存储过滤后的列表
+
+    // 初始化过滤复选框
+    const filterCheckbox = document.getElementById('filterNoDuration');
+
     // 连接进度端口
     connectProgressPort();
 
@@ -25,13 +37,6 @@ document.addEventListener('DOMContentLoaded', async function () {
     // 绑定事件（改为绑定页脚链接）
     downloadBtn.addEventListener('click', startDownload);
     manualDetectLink.addEventListener('click', manualDetect);
-    // 移除与设置相关的事件绑定（serverUrlInput/downloadPathInput）
-    serverUrlInput.addEventListener('change', saveSettings);
-    downloadPathInput.addEventListener('change', saveSettings);
-
-    // 取消设置功能：将相关函数置空（如仍有引用可安全无效化）
-    // async function loadSettings() {} // Commented out - not used
-    async function saveSettings() {}
 
     function connectProgressPort() {
         try {
@@ -116,17 +121,26 @@ document.addEventListener('DOMContentLoaded', async function () {
             return;
         }
 
-        const videoUrls = Array.isArray(response.videoUrls) ? response.videoUrls : [];
-        if (videoUrls.length === 0) {
+        const videoUrlsOrgin = Array.isArray(response.videoUrls) ? response.videoUrls : [];
+        if (videoUrlsOrgin.length === 0) {
             showStatus('未检测到视频链接', 'error');
             return;
         }
 
         // 展示所有候选 URL
-        showAllVideoUrls(videoUrls);
+
+        const validVideoUrls = videoUrlsOrgin.filter(v => {
+            if (typeof v === 'object') {
+                const d = v.duration;
+                return d && d !== '未知';
+            }
+            return false;
+        });
+        console.log('validVideoUrls:', validVideoUrls);
+        showAllVideoUrls(validVideoUrls);
 
         // 优先选择 m3u8，否则退回第一个链接
-        const preferred = videoUrls.find(item => {
+        const preferred = validVideoUrls.find(item => {
             const url = typeof item === 'object' ? item.url : item;
             return url && url.includes('.m3u8');
         }) ?? videoUrls[0];
@@ -198,42 +212,42 @@ document.addEventListener('DOMContentLoaded', async function () {
     }
 
     async function getDefaultVideoName() {
-    try {
-        const tab = await getActiveTab();
-        const tabTitle = (tab.title || '').trim();
-        if (tabTitle) return sanitizeFileName(tabTitle);
+        try {
+            const tab = await getActiveTab();
+            const tabTitle = (tab.title || '').trim();
+            if (tabTitle) return sanitizeFileName(tabTitle);
 
-        const [{ result }] = await chrome.scripting.executeScript({
-            target: { tabId: tab.id },
-            func: () => {
-                const metas = Array.from(document.querySelectorAll('meta'));
-                const getContent = el => (el?.getAttribute('content') || '').trim();
-                const byName = name => metas.find(m => (m.getAttribute('name') || '').toLowerCase() === name);
-                const byProp = prop => metas.find(m => (m.getAttribute('property') || '').toLowerCase() === prop);
-                const byItem = item => metas.find(m => (m.getAttribute('itemprop') || '').toLowerCase() === item);
+            const [{ result }] = await chrome.scripting.executeScript({
+                target: { tabId: tab.id },
+                func: () => {
+                    const metas = Array.from(document.querySelectorAll('meta'));
+                    const getContent = el => (el?.getAttribute('content') || '').trim();
+                    const byName = name => metas.find(m => (m.getAttribute('name') || '').toLowerCase() === name);
+                    const byProp = prop => metas.find(m => (m.getAttribute('property') || '').toLowerCase() === prop);
+                    const byItem = item => metas.find(m => (m.getAttribute('itemprop') || '').toLowerCase() === item);
 
-                const titleCandidates = [
-                    (document.title || '').trim(),
-                    getContent(byProp('og:title')),
-                    getContent(byName('twitter:title')),
-                    getContent(byName('title')),
-                    getContent(byProp('twitter:title')),
-                    getContent(byItem('name')),
-                    getContent(byProp('og:video:title')),
-                    getContent(byName('video:title'))
-                ].filter(Boolean);
+                    const titleCandidates = [
+                        (document.title || '').trim(),
+                        getContent(byProp('og:title')),
+                        getContent(byName('twitter:title')),
+                        getContent(byName('title')),
+                        getContent(byProp('twitter:title')),
+                        getContent(byItem('name')),
+                        getContent(byProp('og:video:title')),
+                        getContent(byName('video:title'))
+                    ].filter(Boolean);
 
-                return titleCandidates[0] || '';
+                    return titleCandidates[0] || '';
+                }
+            });
+
+            if (result && result.trim()) {
+                return sanitizeFileName(result.trim());
             }
-        });
+        } catch (e) { }
 
-        if (result && result.trim()) {
-            return sanitizeFileName(result.trim());
-        }
-    } catch (e) {}
-
-    return `video_${Date.now()}`;
-}
+        return `video_${Date.now()}`;
+    }
 
     function updateProgress(percentage, text) {
         progressFill.style.width = `${percentage}%`;
@@ -265,21 +279,20 @@ document.addEventListener('DOMContentLoaded', async function () {
     });
 
     // 添加一个新函数来显示所有视频URL
-    function showAllVideoUrls(videoUrls) {
+    function showAllVideoUrls(validVideoUrls) {
         const videoUrlContainer = videoUrlDiv;
         videoUrlContainer.innerHTML = '';
 
-        // 计数显示
         const countEl = document.getElementById('videoCountText');
-        if (countEl) countEl.textContent = `共 ${videoUrls.length} 条`;
+        if (countEl) countEl.textContent = `共 ${validVideoUrls.length} 条`;
 
-        if (videoUrls.length === 0) {
+        if (validVideoUrls.length === 0) {
             videoUrlContainer.textContent = '未检测到视频链接';
             return;
         }
 
         // 默认选中第一个 m3u8，否则选第一个
-        let defaultIndex = videoUrls.findIndex(v => {
+        let defaultIndex = validVideoUrls.findIndex(v => {
             const u = typeof v === 'object' ? v.url : v;
             return u && u.includes('.m3u8');
         });
@@ -288,7 +301,7 @@ document.addEventListener('DOMContentLoaded', async function () {
         const urlList = document.createElement('div');
         urlList.className = 'url-list';
 
-        videoUrls.forEach((video, index) => {
+        validVideoUrls.forEach((video, index) => {
             const url = typeof video === 'object' ? video.url : video;
             const duration = typeof video === 'object' ? video.duration : null;
 
@@ -352,7 +365,7 @@ document.addEventListener('DOMContentLoaded', async function () {
         videoInfoDiv.appendChild(urlList);
 
         // 初始化预览卡和当前选择
-        const defaultVideo = videoUrls[defaultIndex];
+        const defaultVideo = validVideoUrls[defaultIndex];
         const defaultUrl = typeof defaultVideo === 'object' ? defaultVideo.url : defaultVideo;
         const defaultDuration = typeof defaultVideo === 'object' ? defaultVideo.duration : null;
         currentVideoUrl = defaultUrl;

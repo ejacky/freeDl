@@ -1,0 +1,46 @@
+# 依赖包（最大的 Token 消耗源）
+node_modules/
+bower_components/
+vendor/
+
+# 构建产物
+dist/
+build/
+.next/
+.nuxt/
+out/
+target/
+bin/
+obj/
+
+# 缓存与临时文件
+.cache/
+.npm/
+.eslintcache
+.stylelintcache
+*.log
+tmp/
+
+# 数据库与版本控制
+.git/
+.svn/
+*.sqlite
+*.db
+
+# 媒体与二进制文件（Claude 读不懂且极其费钱）
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.svg
+*.ico
+*.pdf
+*.zip
+*.tar.gz
+*.mp4
+
+# 环境配置（保护隐私的同时省钱）
+.env*
+
+# 和本项目有关
+icons/

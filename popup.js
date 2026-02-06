@@ -230,12 +230,40 @@ document.addEventListener('DOMContentLoaded', async function () {
 
             downloadBtn.disabled = true;
             progressContainer.classList.remove('hidden');
-            showStatus('正在启动下载...', 'info');
+            showStatus('正在准备下载...', 'info');
+
+            // 检查当前标签页状态
+            const tab = await getActiveTab();
+
+            // 初始化下载参数
+            const videoName = await getDefaultVideoName() || `video_${Date.now()}`;
+
+            // 尝试初始化离线存储（如果需要）
+            try {
+                const initResponse = await chrome.runtime.sendMessage({
+                    action: 'initializeDownload',
+                    m3u8Url: currentVideoUrl,
+                    tabId: tab.id
+                });
+
+                if (initResponse && !initResponse.success && initResponse.error) {
+                    console.warn('Download initialization warning:', initResponse.error);
+                }
+            } catch (initError) {
+                console.warn('Failed to initialize download context:', initError);
+                // Continue anyway - downloads might work without initialization
+            }
+
+            // 添加额外的检查 - 验证URL是否有效
+            if (!currentVideoUrl.startsWith('http')) {
+                throw new Error('无效的视频链接格式');
+            }
 
             const response = await chrome.runtime.sendMessage({
                 action: 'downloadM3U8',
                 m3u8Url: currentVideoUrl,
-                videoName: await getDefaultVideoName() || `video_${Date.now()}`,
+                videoName: videoName,
+                tabId: tab.id
             });
 
             if (!response.success) {
@@ -335,8 +363,26 @@ document.addEventListener('DOMContentLoaded', async function () {
             showStatus('下载完成！', 'success');
             downloadBtn.disabled = false;
         } else if (message.action === 'downloadError') {
-            showStatus('下载失败: ' + message.error, 'error');
+            let errorText = '下载失败: ' + message.error;
+            if (message.help) {
+                errorText += ' ' + message.help;
+            }
+            showStatus(errorText, 'error');
             downloadBtn.disabled = false;
+        } else if (message.action === 'fallbackDownload') {
+            // Handle fallback download message
+            console.log('Received fallback download request');
+            showStatus('下载遇到问题，使用备用方法...', 'warning');
+            // Progress fill will show 100% for fallback
+            updateProgress(100, '下载可能需要手动处理');
+
+            // Auto-reset after showing fallback status
+            setTimeout(() => {
+                isDownloading = false;
+                currentDownloadId = null;
+                downloadBtn.disabled = false;
+                progressContainer.classList.add('hidden');
+            }, 3000);
         }
     });
 

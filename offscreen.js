@@ -49,6 +49,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
             });
             return true;
 
+        case 'cleanupBlobUrls':
+            handleCleanupBlobUrls(message.blobUrls);
+            sendResponse({ success: true });
+            return true;
+
         default:
             console.warn('[OFFSCREEN] Unknown action:', message.action);
 
@@ -105,12 +110,15 @@ async function handleStreamDownload(options) {
 
         // Note: We cannot use showSaveFilePicker here due to lack of user gesture
         // Alternative approach: Use blob streaming without file system
-        return await handleStreamDownloadToBlob(segments, estimatedSize);
+
+        // Initialize progress tracking before starting download
         downloadProgress = {
             processedSize: 0,
             totalSize: estimatedSize || segments.length * 5 * 1024 * 1024, // Assume 5MB per segment if unknown
             lastReportedPercentage: 0
         };
+
+        return await handleStreamDownloadToBlob(segments, estimatedSize);
 
         console.log('[OFFSCREEN] File handle acquired, starting download...');
 
@@ -298,6 +306,24 @@ async function handleCancelDownload() {
     });
 }
 
+// Cleanup blob URLs
+async function handleCleanupBlobUrls(blobUrls) {
+    if (!blobUrls || !Array.isArray(blobUrls)) {
+        return;
+    }
+
+    console.log('[OFFSCREEN] Cleaning up', blobUrls.length, 'blob URLs');
+
+    for (const blobUrl of blobUrls) {
+        try {
+            URL.revokeObjectURL(blobUrl);
+            console.log('[OFFSCREEN] Revoked blob URL:', blobUrl);
+        } catch (error) {
+            console.warn('[OFFSCREEN] Failed to revoke blob URL:', blobUrl, error);
+        }
+    }
+}
+
 // Error handler
 window.addEventListener('error', (event) => {
     console.error('[OFFSCREEN] Global error:', event.error);
@@ -377,6 +403,15 @@ async function handleStreamDownloadToBlob(segments, estimatedSize) {
 
         console.log("[OFFSCREEN] Downloaded into", tempBlobs.length, "blobs");
 
+        // Create blob URLs instead of sending blob objects
+        const blobUrls = [];
+        for (const blob of tempBlobs) {
+            const blobUrl = URL.createObjectURL(blob);
+            blobUrls.push(blobUrl);
+        }
+
+        console.log("[OFFSCREEN] Created blob URLs:", blobUrls.length);
+
         // Report final status
         sendProgressUpdate({
             type: 'downloadComplete',
@@ -384,13 +419,13 @@ async function handleStreamDownloadToBlob(segments, estimatedSize) {
             filename: 'temp_stream_' + Date.now(),
             totalSize: totalBytesProcessed,
             blobsCount: tempBlobs.length,
-            blobs: tempBlobs
+            blobUrls: blobUrls  // Send blob URLs instead of blobs
         });
 
         return {
             success: true,
             totalSize: totalBytesProcessed,
-            blobs: tempBlobs,
+            blobUrls: blobUrls,  // Return blob URLs instead of blobs
             filename: 'streamed_video.mp4'
         };
 

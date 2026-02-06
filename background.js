@@ -342,7 +342,8 @@ async function downloadM3U8Video(m3u8Url, videoName, tabId) {
         let offlineModeAvailable = false;
 
         // First try to get offline cache if available
-        if (tabId) {
+        //if (tabId) {
+        if (false) {
             try {
                 const offlineData = await getOfflineCacheData(m3u8Url, tabId);
                 if (offlineData.success && offlineData.data) {
@@ -536,7 +537,7 @@ async function downloadM3U8WithStream(segmentUrls, filename, estimatedSize) {
                         if (message.data.type === 'downloadComplete') {
                             chrome.runtime.onMessage.removeListener(messageListener);
                             // Filter out blobs as they cannot be transferred via chrome messages
-                            resolve({ blobUrls: message.data.blobUrls, totalSize: message.data.totalSize });
+                            resolve({ finalBlobUrl: message.data.finalBlobUrl, blobUrls: message.data.blobUrls, totalSize: message.data.totalSize });
                         } else if (message.data.type === 'progress') {
                             // Forward progress to popup
                             if (progressPort) {
@@ -585,6 +586,7 @@ async function downloadM3U8WithStream(segmentUrls, filename, estimatedSize) {
 
             console.log('[BACKGROUND] Stream download completed successfully, received', result.blobs?.length || '0', 'blobs');
 
+
             // Cache the segments for offline mode if this is the first successful download
             if (result.blobUrls && result.blobUrls.length > 0) {
                 try {
@@ -598,7 +600,7 @@ async function downloadM3U8WithStream(segmentUrls, filename, estimatedSize) {
             }
 
             // Download each blob as a part or merge them
-            await downloadBlobUrlsAsParts(result.blobUrls, filename);
+            await downloadBlobUrlsAsParts(result.finalBlobUrl, result.blobUrls, filename);
 
             console.log('[BACKGROUND] All blobs downloaded successfully');
             return result;
@@ -618,50 +620,30 @@ async function downloadM3U8WithStream(segmentUrls, filename, estimatedSize) {
 }
 
 // 下载多个blob URLs作为部分文件
-async function downloadBlobUrlsAsParts(blobUrls, filename) {
+async function downloadBlobUrlsAsParts(finalBlobUrl, blobUrls, filename) {
     console.log('[BACKGROUND] Downloading', blobUrls.length, 'blob URL parts for file:', filename);
 
-    if (!blobUrls || blobUrls.length === 0) {
-        throw new Error('No blob URLs to download');
+    if (!finalBlobUrl && (!blobUrls || blobUrls.length === 0)) {
+        throw new Error('No final blob URL or blob URLs to download');
     }
 
-    // 如果是单个blob URL，直接下载
-    if (blobUrls.length === 1) {
-        await chrome.downloads.download({
-            url: blobUrls[0],
-            filename: filename,
-            saveAs: false
-        });
-
-        // Request cleanup of blob URL from offscreen document
-        requestBlobUrlCleanup(blobUrls);
-        return;
-    }
+    let cleanupBoblUrls = [...(blobUrls || [])];
+    if (finalBlobUrl) cleanupBoblUrls.unshift(finalBlobUrl);
 
     // 多个blobs，需要下载后合并或使用多部分下载
     try {
-        // 下载所有blob URLs并合并内容
-        console.log('[BACKGROUND] Downloading and merging', blobUrls.length, 'blob URLs into single file...');
-
-        // Fetch all blob URLs to get the blob data
-        const blobPromises = blobUrls.map(url => fetch(url).then(r => r.blob()));
-        const blobs = await Promise.all(blobPromises);
-
-        // Merge all blobs
-        const mergedBlob = new Blob(blobs, { type: 'video/mp4' });
-        console.log('[BACKGROUND] Merged blob size:', mergedBlob.size, 'bytes');
-
-        // Convert merged blob to data URL since we can't use createObjectURL in service worker
-        const dataUrl = await createBlobUrl(mergedBlob);
+        // 下载最终blob URL
+        console.log('[BACKGROUND] Downloading final blob URL...');
 
         await chrome.downloads.download({
-            url: dataUrl,
+            url: finalBlobUrl,
             filename: filename,
             saveAs: false
         });
 
+
         // Request cleanup of blob URLs after successful download
-        requestBlobUrlCleanup(blobUrls);
+        requestBlobUrlCleanup(cleanupBoblUrls);
 
         console.log('[BACKGROUND] Successfully downloaded merged file:', filename);
     } catch (error) {
@@ -682,23 +664,23 @@ async function downloadBlobUrlsAsParts(blobUrls, filename) {
             } catch (downloadError) {
                 console.error(`[BACKGROUND] Failed to download part ${i + 1}:`, downloadError);
                 // Still cleanup on error, but re-throw
-                requestBlobUrlCleanup(blobUrls);
+                requestBlobUrlCleanup(cleanupBoblUrls);
                 throw downloadError;
             }
         }
 
         // Cleanup after successful separate downloads
-        requestBlobUrlCleanup(blobUrls);
+        requestBlobUrlCleanup(cleanupBoblUrls);
     }
 }
 
 // Request cleanup of blob URLs from offscreen document
-async function requestBlobUrlCleanup(blobUrls) {
+async function requestBlobUrlCleanup(cleanupBoblUrls) {
     try {
         // Send message to offscreen to cleanup blob URLs
         chrome.runtime.sendMessage({
             action: 'cleanupBlobUrls',
-            blobUrls: blobUrls
+            blobUrls: cleanupBoblUrls
         }).catch(error => {
             console.warn('[BACKGROUND] Failed to request blob URL cleanup:', error);
         });

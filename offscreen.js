@@ -120,93 +120,6 @@ async function handleStreamDownload(options) {
 
         return await handleStreamDownloadToBlob(segments, estimatedSize);
 
-        console.log('[OFFSCREEN] File handle acquired, starting download...');
-
-        // Download segments in batches to control memory usage
-
-        let batchStart = 0;
-        let failedSegments = [];
-        let totalProcessedSegments = 0;
-
-        while (batchStart < segments.length) {
-            // Process segments in batches
-            const batchEnd = Math.min(batchStart + 10, segments.length);
-            const batchSegments = segments.slice(batchStart, batchEnd);
-
-            console.log(`[OFFSCREEN] Processing batch ${batchStart + 1}-${batchEnd}/${segments.length}`);
-
-            // Download batch segments concurrently
-            const batchPromises = [];
-            for (let i = 0; i < batchSegments.length; i++) {
-                const segmentIndex = batchStart + i;
-                batchPromises.push(downloadSegmentWithRetry(batchSegments[i], segmentIndex, 3));
-            }
-
-            const results = await Promise.allSettled(batchPromises);
-
-            // Process results and write to file
-            let batchProcessedSegments = 0;
-            for (let i = 0; i < results.length; i++) {
-                const result = results[i];
-                const segmentIndex = batchStart + i;
-
-                if (result.status === 'fulfilled' && result.value) {
-                    // Write segment data to file
-                    await fileWriter.write(result.value);
-
-                    const dataSize = result.value.byteLength;
-                    downloadProgress.processedSize += dataSize;
-                    batchProcessedSegments++;
-                    totalProcessedSegments++;
-
-                    // Report progress
-                    await reportProgress(segmentIndex, segments.length, dataSize);
-                } else {
-                    console.error(`[OFFSCREEN] Failed to process segment ${segmentIndex + 1}:`, result.reason);
-                    failedSegments.push({
-                        index: segmentIndex,
-                        url: segments[segmentIndex],
-                        error: result.reason
-                    });
-                }
-            }
-
-            console.log(`[OFFSCREEN] Batch completed: ${batchProcessedSegments}/${batchSegments.length} segments`);
-
-            // Check if we need to clean up memory
-            if (totalProcessedSegments % 100 === 0) {
-                console.log('[OFFSCREEN] Cleaning up memory...');
-                // Force garbage collection if available
-                if (window.gc) {
-                    window.gc();
-                }
-            }
-
-            batchStart = batchEnd;
-        }
-
-        // Finish the file
-        await fileWriter.close();
-        fileWriter = null;
-
-        console.log('[OFFSCREEN] Download completed successfully');
-
-        // Report final status
-        sendProgressUpdate({
-            type: 'downloadComplete',
-            totalSegments: segments.length,
-            failedSegmentCount: failedSegments.length,
-            filename: fileHandle.name,
-            totalSize: downloadProgress.processedSize
-        });
-
-        return {
-            success: true,
-            filename: fileHandle.name,
-            totalSize: downloadProgress.processedSize,
-            failedSegments: failedSegments.length
-        };
-
     } catch (error) {
         console.error('[OFFSCREEN] Stream download failed:', error);
         await cleanup();
@@ -236,7 +149,7 @@ async function downloadSegmentWithRetry(url, index, retries) {
                 throw new Error(`HTTP ${response.status} for segment ${index + 1}`);
             }
 
-            const data = await response.arrayBuffer();
+            const data = await response.blob();
 
             if (data.byteLength === 0) {
                 throw new Error(`Empty segment ${index + 1}`);
@@ -401,9 +314,8 @@ async function handleStreamDownloadToBlob(segments, estimatedSize) {
             tempBlobs.push(new Blob(currentBlobData, { type: 'video/mp4' }));
         }
 
-        console.log("[OFFSCREEN] Downloaded into", tempBlobs.length, "blobs");
 
-        // Create blob URLs instead of sending blob objects
+        console.log("[OFFSCREEN] Downloaded into", tempBlobs.length, "blobs");
         const blobUrls = [];
         for (const blob of tempBlobs) {
             const blobUrl = URL.createObjectURL(blob);
@@ -411,6 +323,10 @@ async function handleStreamDownloadToBlob(segments, estimatedSize) {
         }
 
         console.log("[OFFSCREEN] Created blob URLs:", blobUrls.length);
+        const finalBlob = new Blob(tempBlobs, { type: 'video/mp4' });
+        const finalBlobUrl = URL.createObjectURL(finalBlob);
+        console.log("[OFFSCREEN] Created final blob URL:", finalBlobUrl);
+
 
         // Report final status
         sendProgressUpdate({
@@ -419,13 +335,15 @@ async function handleStreamDownloadToBlob(segments, estimatedSize) {
             filename: 'temp_stream_' + Date.now(),
             totalSize: totalBytesProcessed,
             blobsCount: tempBlobs.length,
-            blobUrls: blobUrls  // Send blob URLs instead of blobs
+            blobUrls: blobUrls,
+            finalBlobUrl: finalBlobUrl
         });
 
         return {
             success: true,
             totalSize: totalBytesProcessed,
             blobUrls: blobUrls,  // Return blob URLs instead of blobs
+            finalBlobUrl: finalBlobUrl,
             filename: 'streamed_video.mp4'
         };
 

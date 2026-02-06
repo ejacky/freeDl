@@ -116,6 +116,7 @@ document.addEventListener('DOMContentLoaded', async function () {
     // 获取当前活动标签页
     async function getActiveTab() {
         const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+        console.log("all active tabs:" + tabs)
         const tab = tabs && tabs[0];
         if (!tab || !tab.id) {
             throw new Error('未找到活动标签页');

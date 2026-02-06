@@ -98,14 +98,14 @@ document.addEventListener('DOMContentLoaded', async function () {
     }
 
     // 优化后的视频检测主流程
-    async function detectVideo(action = 'quickDetectVideo') {
+    async function detectVideo() {
         showStatus('正在检测页面中的视频...', 'info');
 
         try {
             const tab = await getActiveTab();
             await ensureContentScriptInjected(tab.id);
 
-            const response = await chrome.tabs.sendMessage(tab.id, { action, tabId: tab.id });
+            const response = await chrome.tabs.sendMessage(tab.id, { action: 'detectVideo', tabId: tab.id });
             processDetectionResponse(response);
         } catch (error) {
             console.error('检测视频失败:', error);
@@ -152,15 +152,16 @@ document.addEventListener('DOMContentLoaded', async function () {
             return;
         }
 
-        const videoUrlsOrgin = Array.isArray(response.videoUrls) ? response.videoUrls : [];
-        if (videoUrlsOrgin.length === 0) {
+        const originVideos = Array.isArray(response.videos) ? response.videos : [];
+        if (originVideos.length === 0) {
             showStatus('未检测到视频链接', 'error');
             return;
         }
 
         // 展示所有候选 URL
+        console.log("response video urls:" + originVideos)
 
-        const validVideoUrls = videoUrlsOrgin.filter(v => {
+        const validVideoUrls = originVideos.filter(v => {
             if (typeof v === 'object') {
                 const d = v.duration;
                 return d && d !== '未知';
@@ -200,7 +201,7 @@ document.addEventListener('DOMContentLoaded', async function () {
 
         // 稍作延迟，有利于收集网络拦截数据
         await new Promise(resolve => setTimeout(resolve, 1000));
-        await detectVideo('detectVideo');
+        await detectVideo();
 
         manualDetectLink.textContent = originalText;
         manualDetectLink.style.pointerEvents = 'auto';

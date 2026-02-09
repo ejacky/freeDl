@@ -63,3 +63,5 @@
 - Cache is automatically managed to prevent storage issues
 
 [2026-02-09] 改造: 在 background 脚本加载时调用 setupWebRequestListener，使浏览器重启后也能注册 webRequest 监听 (background.js)
+
+[2026-02-09] 修复: 用 chrome.storage.session 持久化 detectedUrls，解决 SW 休眠后打开 popup 有时无数据的问题；getDetectedUrls 无内存时从 session 恢复 (background.js)

@@ -45,8 +45,46 @@ async function closeOffscreenDocument() {
     }
 }
 
-// 存储检测到的m3u8 URL
+// 存储检测到的m3u8 URL（内存 + session 持久化，避免 SW 休眠后丢失）
 const detectedUrls = new Map();
+
+const DETECTED_URLS_STORAGE_KEY = 'detectedUrls';
+
+/** 将某 tab 的 URL 集合写入 session 存储，SW 重启后可恢复 */
+function persistDetectedUrlsForTab(tabId) {
+    if (!detectedUrls.has(tabId)) return;
+    const urls = Array.from(detectedUrls.get(tabId));
+    chrome.storage.session.get(DETECTED_URLS_STORAGE_KEY).then((data) => {
+        const all = data[DETECTED_URLS_STORAGE_KEY] || {};
+        all[tabId] = urls;
+        return chrome.storage.session.set({ [DETECTED_URLS_STORAGE_KEY]: all });
+    }).catch((err) => console.warn('[BACKGROUND] persistDetectedUrlsForTab failed:', err));
+}
+
+/** 向内存并持久化添加一条检测到的 URL */
+function addDetectedUrl(tabId, url) {
+    if (tabId <= 0 || !url) return;
+    if (!detectedUrls.has(tabId)) {
+        detectedUrls.set(tabId, new Set());
+    }
+    detectedUrls.get(tabId).add(url);
+    persistDetectedUrlsForTab(tabId);
+}
+
+/** 脚本加载时从 session 恢复 detectedUrls，解决“打开 popup 有时无数据” */
+async function restoreDetectedUrlsFromSession() {
+    try {
+        const data = await chrome.storage.session.get(DETECTED_URLS_STORAGE_KEY);
+        const all = data[DETECTED_URLS_STORAGE_KEY] || {};
+        for (const [tid, urls] of Object.entries(all)) {
+            if (Array.isArray(urls) && urls.length > 0) {
+                detectedUrls.set(Number(tid), new Set(urls));
+            }
+        }
+    } catch (e) {
+        console.warn('[BACKGROUND] restoreDetectedUrlsFromSession failed:', e);
+    }
+}
 
 // Connection for progress updates
 progressPort = null;
@@ -102,14 +140,10 @@ function setupWebRequestListener() {
         (details) => {
             if (isM3u8Url(details.url)) {
 
-                // 存储到对应标签页
+                // 存储到对应标签页（含 session 持久化）
                 const tabId = details.tabId;
                 if (tabId > 0) {
-                    if (!detectedUrls.has(tabId)) {
-                        detectedUrls.set(tabId, new Set());
-                    }
-                    detectedUrls.get(tabId).add(details.url);
-
+                    addDetectedUrl(tabId, details.url);
                     // 发送消息给内容脚本
                     chrome.tabs.sendMessage(tabId, {
                         action: 'm3u8Detected',
@@ -133,10 +167,7 @@ function setupWebRequestListener() {
 
                 const tabId = details.tabId;
                 if (tabId > 0) {
-                    if (!detectedUrls.has(tabId)) {
-                        detectedUrls.set(tabId, new Set());
-                    }
-                    detectedUrls.get(tabId).add(details.redirectUrl);
+                    addDetectedUrl(tabId, details.redirectUrl);
                 }
             }
         },
@@ -160,10 +191,7 @@ function setupWebRequestListener() {
 
                 const tabId = details.tabId;
                 if (tabId > 0) {
-                    if (!detectedUrls.has(tabId)) {
-                        detectedUrls.set(tabId, new Set());
-                    }
-                    detectedUrls.get(tabId).add(details.url);
+                    addDetectedUrl(tabId, details.url);
                 }
             }
         },
@@ -174,6 +202,8 @@ function setupWebRequestListener() {
 
 // 脚本加载时即注册（覆盖安装、更新、浏览器重启）
 setupWebRequestListener();
+// 从 session 恢复检测到的 URL，避免 SW 休眠后打开 popup 无数据
+restoreDetectedUrlsFromSession();
 
 // 使用debugger API进行更详细的网络监控
 async function setupDebuggerListener(tabId) {
@@ -192,11 +222,7 @@ async function setupDebuggerListener(tabId) {
                         mimeType.includes('application/vnd.apple.mpegurl') ||
                         mimeType.includes('application/x-mpegURL')) {
                         console.log('Debugger检测到m3u8:', url);
-
-                        if (!detectedUrls.has(tabId)) {
-                            detectedUrls.set(tabId, new Set());
-                        }
-                        detectedUrls.get(tabId).add(url);
+                        addDetectedUrl(tabId, url);
                     }
                 }
             }
@@ -210,12 +236,19 @@ chrome.runtime.onInstalled.addListener(() => {
     console.log('Video Downloader 扩展已安装/更新');
 });
 
-// 监听标签页关闭，清理相关数据
+// 监听标签页关闭，清理相关数据（内存 + session）
 chrome.tabs.onRemoved.addListener((tabId) => {
     if (detectedUrls.has(tabId)) {
         detectedUrls.delete(tabId);
         console.log(`标签页 ${tabId} 已关闭，清理检测到的URL数据`);
     }
+    chrome.storage.session.get(DETECTED_URLS_STORAGE_KEY).then((data) => {
+        const all = data[DETECTED_URLS_STORAGE_KEY] || {};
+        if (all[tabId]) {
+            delete all[tabId];
+            chrome.storage.session.set({ [DETECTED_URLS_STORAGE_KEY]: all });
+        }
+    }).catch(() => {});
 });
 
 
@@ -251,17 +284,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     if (message.action === 'getDetectedUrls') {
         const tabId = sender.tab?.id;
-        if (tabId && detectedUrls.has(tabId)) {
+        if (!tabId) {
+            sendResponse({ success: true, urls: [] });
+            return true;
+        }
+        if (detectedUrls.has(tabId)) {
             sendResponse({
                 success: true,
                 urls: Array.from(detectedUrls.get(tabId))
             });
-        } else {
-            sendResponse({
-                success: true,
-                urls: []
-            });
+            return true;
         }
+        // SW 可能刚唤醒，内存为空，从 session 恢复该 tab 再返回
+        chrome.storage.session.get(DETECTED_URLS_STORAGE_KEY).then((data) => {
+            const all = data[DETECTED_URLS_STORAGE_KEY] || {};
+            const urls = all[tabId] || [];
+            if (urls.length > 0) {
+                detectedUrls.set(tabId, new Set(urls));
+            }
+            sendResponse({ success: true, urls });
+        }).catch(() => {
+            sendResponse({ success: true, urls: [] });
+        });
         return true;
     }
 
@@ -1096,10 +1140,9 @@ async function initializeDownloadContext(m3u8Url, tabId) {
             // Don't fail - continue anyway as it might work
         }
 
-        // 3. Ensure we have URL data cached for this tab
-        if (tabId && !detectedUrls.has(tabId)) {
-            // Add the URL to our cache
-            detectedUrls.set(tabId, new Set([m3u8Url]));
+        // 3. Ensure we have URL data cached for this tab（含 session 持久化）
+        if (tabId) {
+            addDetectedUrl(tabId, m3u8Url);
             console.log('[BACKGROUND] Cached M3U8 URL for tab', tabId);
         }
 

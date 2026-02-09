@@ -248,7 +248,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
             delete all[tabId];
             chrome.storage.session.set({ [DETECTED_URLS_STORAGE_KEY]: all });
         }
-    }).catch(() => {});
+    }).catch(() => { });
 });
 
 

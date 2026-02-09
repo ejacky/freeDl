@@ -167,6 +167,7 @@
             // 获取后台脚本检测到的URL
             console.log('获取后台检测的URL...');
             const backgroundUrls = await getUrlsFromBackground();
+            console.log('[context] getUrlsFromBackground: ' + backgroundUrls)
             if (backgroundUrls.length > 0) {
                 console.log('后台检测到m3u8:', backgroundUrls);
                 videoUrls.push(...backgroundUrls);

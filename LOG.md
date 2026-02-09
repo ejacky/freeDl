@@ -61,3 +61,5 @@
 - Error messages are more descriptive and user-friendly
 - The offline mode works transparently without user intervention
 - Cache is automatically managed to prevent storage issues
+
+[2026-02-09] 改造: 在 background 脚本加载时调用 setupWebRequestListener，使浏览器重启后也能注册 webRequest 监听 (background.js)

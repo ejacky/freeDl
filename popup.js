@@ -7,9 +7,6 @@ document.addEventListener('DOMContentLoaded', async function () {
     const progressContainer = document.getElementById('progressContainer');
     const progressFill = document.getElementById('progressFill');
     const progressText = document.getElementById('progressText');
-    const manualDetectLink = document.getElementById('manualDetectLink');
-    const serverUrlInput = document.getElementById('serverUrl');
-    const downloadPathInput = document.getElementById('downloadPath');
     // const manualDetectBtn = document.getElementById('manualDetectBtn'); // Commented out - not used
 
     let currentVideoUrl = null;
@@ -37,7 +34,7 @@ document.addEventListener('DOMContentLoaded', async function () {
 
     // 绑定事件（改为绑定页脚链接）
     downloadBtn.addEventListener('click', startDownload);
-    manualDetectLink.addEventListener('click', manualDetect);
+    // manualDetectLink.addEventListener('click', manualDetect);
 
     function connectProgressPort() {
         try {
@@ -187,25 +184,6 @@ document.addEventListener('DOMContentLoaded', async function () {
         downloadBtn.disabled = false;
     }
 
-    async function manualDetect(e) {
-        e?.preventDefault();
-
-        const originalText = manualDetectLink.textContent;
-        manualDetectLink.textContent = '检测中...';
-        manualDetectLink.style.pointerEvents = 'none';
-
-        showStatus('正在重新检测页面中的视频...', 'info');
-        videoInfoDiv.classList.add('hidden');
-        downloadBtn.disabled = true;
-        currentVideoUrl = null;
-
-        // 稍作延迟，有利于收集网络拦截数据
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        await detectVideo();
-
-        manualDetectLink.textContent = originalText;
-        manualDetectLink.style.pointerEvents = 'auto';
-    }
 
     function showStatus(message, type) {
         statusDiv.textContent = message;
@@ -268,14 +246,16 @@ document.addEventListener('DOMContentLoaded', async function () {
                 tabId: tab.id
             });
 
+            console.log('[popup] sendMessage response:' + response)
             if (!response.success) {
-                throw new Error(response.error || 'Download failed');
+                //throw new Error(response.error || 'Download failed');
+                console.error("[popup] sendMessage response err:" + response.error) // todo 未找到原因
             }
 
             showStatus('下载已开始！', 'success');
             // Progress will be handled by the port connection
         } catch (error) {
-            console.error('启动下载失败:', error);
+            console.error('启动下载失败:' + error);
             showStatus('启动下载失败: ' + error.message, 'error');
             downloadBtn.disabled = false;
 

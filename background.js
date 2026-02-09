@@ -101,7 +101,6 @@ function setupWebRequestListener() {
     chrome.webRequest.onBeforeRequest.addListener(
         (details) => {
             if (isM3u8Url(details.url)) {
-                console.log('检测到m3u8请求:', details.url);
 
                 // 存储到对应标签页
                 const tabId = details.tabId;
@@ -173,6 +172,9 @@ function setupWebRequestListener() {
     );
 }
 
+// 脚本加载时即注册（覆盖安装、更新、浏览器重启）
+setupWebRequestListener();
+
 // 使用debugger API进行更详细的网络监控
 async function setupDebuggerListener(tabId) {
     try {
@@ -205,8 +207,7 @@ async function setupDebuggerListener(tabId) {
 }
 
 chrome.runtime.onInstalled.addListener(() => {
-    console.log('Video Downloader 扩展已安装');
-    setupWebRequestListener();
+    console.log('Video Downloader 扩展已安装/更新');
 });
 
 // 监听标签页关闭，清理相关数据
@@ -283,9 +284,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     if (message.action === 'downloadM3U8') {
-        downloadM3U8Video(message.m3u8Url, message.videoName, message.tabId)
-            .then(() => sendResponse({ success: true }))
-            .catch(error => sendResponse({ success: false, error: error.message }));
+        downloadM3U8Video(message.m3u8Url, message.videoName, message.tabId).then(() =>
+            sendResponse({ success: true })
+        ).catch(error => {
+            sendResponse({ success: false, error: error.message })
+        });
         return true;
     }
 

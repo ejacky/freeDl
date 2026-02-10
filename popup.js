@@ -55,6 +55,7 @@ document.addEventListener('DOMContentLoaded', async function () {
         try {
             progressPort = chrome.runtime.connect({ name: 'downloadProgress' });
             progressPort.onMessage.addListener((message) => {
+                console.log('[popup]downloadProgress:message type:' + message.type)
                 if (message.type === 'progress') {
                     const percentage = message.percentage || 0;
                     const text = message.message || `下载中... ${percentage}% (${message.current || 0}/${message.total || 0})`;
@@ -94,6 +95,7 @@ document.addEventListener('DOMContentLoaded', async function () {
 
         // 弹出窗口时检查是否有正在进行的下载
         chrome.runtime.sendMessage({ action: 'checkDownloadStatus' }, (response) => {
+            console.log('[popup] checkDownloadStatus response isDownloading: ' + response)
             if (response && response.isDownloading) {
                 showStatus('检测到正在进行的下载，请稍候或等待下载完成', 'info');
                 isDownloading = true;

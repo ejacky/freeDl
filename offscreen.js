@@ -151,12 +151,11 @@ async function downloadSegmentWithRetry(url, index, retries) {
 
             const data = await response.blob();
 
-            if (data.byteLength === 0) {
+            if (data.size === 0) {
                 throw new Error(`Empty segment ${index + 1}`);
             }
 
-            console.log(`[OFFSCREEN] Segment ${index + 1} downloaded: ${(data.byteLength / 1024).toFixed(2)}KB`);
-
+            console.log(`[OFFSCREEN] Segment ${index + 1} downloaded: ${(data.size / 1024).toFixed(2)}KB`);
             return data;
 
         } catch (error) {
@@ -289,19 +288,19 @@ async function handleStreamDownloadToBlob(segments, estimatedSize) {
                     const data = result.value;
 
                     // Add to current blob if within size limit
-                    if (currentBlobSize + data.byteLength < MAX_BLOB_SIZE) {
+                    if (currentBlobSize + data.size < MAX_BLOB_SIZE) {
                         currentBlobData.push(data);
-                        currentBlobSize += data.byteLength;
+                        currentBlobSize += data.size;
                     } else {
                         // Create a blob with existing data
                         tempBlobs.push(new Blob(currentBlobData, { type: 'video/mp4' }));
 
                         // Start new blob
                         currentBlobData = [data];
-                        currentBlobSize = data.byteLength;
+                        currentBlobSize = data.size;
                     }
 
-                    totalBytesProcessed += data.byteLength;
+                    totalBytesProcessed += data.size;
 
                     // Report progress
                     await reportBlobProgress(i + j, segments.length, totalBytesProcessed, estimatedSize);

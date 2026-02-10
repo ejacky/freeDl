@@ -254,15 +254,6 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 
 // 监听来自popup和内容脚本的消息
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.action === 'downloadVideo') {
-        handleDownloadRequest(message.url, message.downloadPath).then(result => {
-            sendResponse(result);
-        }).catch(error => {
-            sendResponse({ success: false, error: error.message });
-        });
-        return true; // 保持消息通道开放
-    }
-
     if (message.action === 'highlightIcon') {
         // 当检测到视频时点亮扩展图标
         const tabId = sender.tab?.id;
@@ -337,6 +328,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     if (message.action === 'checkDownloadStatus') {
+        console.log('[BACKGROUND] checkDownloadStatus');
         sendResponse({
             isDownloading: currentDownload.isActive,
             downloadId: null,
@@ -544,20 +536,6 @@ async function downloadM3U8Video(m3u8Url, videoName, tabId) {
             tabId: null
         };
     }
-}
-
-// 大文件流式下载
-async function downloadLargeFile(blob, filename) {
-    console.log('[DOWNLOAD] Processing large file, size:', blob.size, 'bytes');
-
-    // 对于大文件，我们直接使用 FileReader 处理
-    const dataUrl = await createBlobUrl(blob);
-
-    await chrome.downloads.download({
-        url: dataUrl,
-        filename: filename,
-        saveAs: false
-    });
 }
 
 // Stream-based M3U8 download using offscreen document
@@ -1084,36 +1062,7 @@ function createBlobUrl(blob) {
     });
 }
 
-async function handleDownloadRequest(url, downloadPath) {
-    try {
-        // 这里可以添加与本地服务器的通信逻辑
-        // 目前先返回成功状态，实际下载由本地服务器处理
-        console.log('收到下载请求:', { url, downloadPath });
 
-        chrome.downloads.download({
-            url: url,             // 要下载的文件URL
-            filename: downloadPath || "downloaded_file.txt", // 自定义文件名（可选）
-            saveAs: false                 // 是否弹出"另存为"对话框
-        }, (downloadId) => {
-            if (chrome.runtime.lastError) {
-                console.error("Download failed:", chrome.runtime.lastError.message);
-            } else {
-                console.log("Download started:", downloadId);
-            }
-        });
-
-        return {
-            success: true,
-            message: '下载请求已发送到本地服务器'
-        };
-    } catch (error) {
-        console.error('处理下载请求失败:', error);
-        return {
-            success: false,
-            error: error.message
-        };
-    }
-}
 
 // 添加下载状态管理
 // Add function to initialize download context and prepare for offline downloads
@@ -1432,6 +1381,7 @@ chrome.runtime.onInstalled.addListener((details) => {
 // Handle connections for progress updates
 chrome.runtime.onConnect.addListener((port) => {
     if (port.name === 'downloadProgress') {
+
         progressPort = port;
 
         port.onMessage.addListener((message) => {

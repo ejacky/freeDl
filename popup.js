@@ -94,9 +94,25 @@ document.addEventListener('DOMContentLoaded', async function () {
         }
 
         // 弹出窗口时检查是否有正在进行的下载
-        chrome.runtime.sendMessage({ action: 'checkDownloadStatus' }, (response) => {
-            console.log('[popup] checkDownloadStatus response isDownloading: ' + response)
-            if (response && response.isDownloading) {
+        // chrome.runtime.sendMessage({ action: 'checkDownloadStatus' }, (response) => {
+        //     console.log('[popup] checkDownloadStatus response isDownloading: ' + response.isDownloading)
+        //     if (response && response.isDownloading) {
+        //         showStatus('检测到正在进行的下载，请稍候或等待下载完成', 'info');
+        //         isDownloading = true;
+
+        //         // 如果有当前进度，立即显示
+        //         if (response.currentProgress && response.currentProgress.percentage > 0) {
+        //             currentDownloadId = null; // 为了简化，不保存 ID
+        //             const progress = response.currentProgress;
+        //             progressContainer.classList.remove('hidden');
+        //             updateProgress(progress.percentage, progress.message);
+        //         }
+        //     }
+        // });
+
+        chrome.storage.session.get('currentDownload').then((res) => {
+            const currentDownload = res.currentDownload || { isActive: false };
+            if (currentDownload && currentDownload.isDownloading) {
                 showStatus('检测到正在进行的下载，请稍候或等待下载完成', 'info');
                 isDownloading = true;
 

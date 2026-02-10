@@ -89,15 +89,13 @@ async function restoreDetectedUrlsFromSession() {
 // Connection for progress updates
 progressPort = null;
 
-// 跟踪当前下载状态
+// 跟踪当前下载状态 - 从 session 存储初始化
 let currentDownload = {
     isActive: false,
     startTime: null,
     tabId: null,
     url: null
 };
-
-// 保存当前下载进度信息
 let currentProgress = {
     percentage: 0,
     current: 0,
@@ -105,6 +103,21 @@ let currentProgress = {
     message: '',
     lastUpdate: null
 };
+
+// 尝试从 session 中恢复 currentDownload 和 currentProgress
+(async () => {
+    try {
+        const sessionData = await chrome.storage.session.get(['currentDownload', 'currentProgress']);
+        if (sessionData.currentDownload && typeof sessionData.currentDownload === 'object') {
+            currentDownload = { ...currentDownload, ...sessionData.currentDownload };
+        }
+        if (sessionData.currentProgress && typeof sessionData.currentProgress === 'object') {
+            currentProgress = { ...currentProgress, ...sessionData.currentProgress };
+        }
+    } catch (e) {
+        console.warn('[BACKGROUND] Failed to initialize download state from session:', e);
+    }
+})();
 
 // 更全面的m3u8检测函数
 function isM3u8Url(url) {
@@ -358,6 +371,29 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 });
 
+
+
+async function updateDownloadStatus(newFields) {
+    // 1. 先从 storage 中获取当前完整的对象
+    const result = await chrome.storage.session.get('currentDownload');
+    const oldData = result.currentDownload || {};
+
+    // 2. 合并新旧数据（newFields 会覆盖 oldData 中同名的字段）
+    const newData = { ...oldData, ...newFields };
+
+    // 3. 写回 storage
+    await chrome.storage.session.set({ currentDownload: newData });
+}
+
+async function getDownloadStatus() {
+    // 1. 先从 storage 中获取当前完整的对象
+    const result = await chrome.storage.session.get('currentDownload');
+    const data = result.currentDownload || {};
+
+    return data
+}
+
+
 async function downloadM3U8Video(m3u8Url, videoName, tabId) {
     // 检查是否已有下载在进行
     if (currentDownload.isActive) {
@@ -372,6 +408,9 @@ async function downloadM3U8Video(m3u8Url, videoName, tabId) {
         url: m3u8Url,
         tabId: tabId
     };
+
+    // 更新下载状态
+    await updateDownloadStatus(currentDownload)
 
     try {
         console.log('Downloading M3U8:', m3u8Url);
@@ -790,6 +829,8 @@ async function downloadSegments(segmentUrls, failOnError = false) {
                 message: `下载中... ${percentage}%`,
                 lastUpdate: Date.now()
             };
+
+            await updateDownloadField({ 'currentProgress': currentProgress })
         }
 
         // 当达到内存限制时，合并当前chunks并创建临时blob
